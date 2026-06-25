@@ -2,7 +2,7 @@
   "expo": {
     "name": "Kadi",
     "slug": "poker",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -11,7 +11,7 @@
     },
     "android": {
       "package": "com.lawre.kadi",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "backgroundColor": "#0b6b3a",
         "foregroundImage": "./assets/android-icon-foreground.png",
