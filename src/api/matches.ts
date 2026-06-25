@@ -1,4 +1,4 @@
-import { GameSettings, Move } from '../game/types';
+import { GameSettings, GameState, Move } from '../game/types';
 import { apiFetch } from './client';
 
 export interface RosterEntry {
@@ -70,4 +70,15 @@ export function sendMove(matchId: string, move: Move): Promise<MoveResponse> {
     method: 'POST',
     body: { move },
   });
+}
+
+export interface MatchStateResponse {
+  state: GameState | null;
+  roster: Roster;
+}
+
+// Current authoritative state — fetched when opening the game so we render
+// immediately instead of waiting for the next broadcast.
+export function getMatchState(matchId: string): Promise<MatchStateResponse> {
+  return apiFetch<MatchStateResponse>(`/matches/${matchId}/state`);
 }

@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api/client';
 import { useAuth } from '../api/auth';
-import { Roster, sendMove } from '../api/matches';
+import { getMatchState, Roster, sendMove } from '../api/matches';
 import { ReverbClient } from '../realtime/reverb';
 import { GameState, Move, Suit } from '../game/types';
 import { initSounds, playSound } from './sound';
@@ -108,6 +108,31 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
       clientRef.current = null;
     };
   }, [matchId, token, refreshMe]);
+
+  // Once subscribed, fetch the current authoritative state so we render
+  // immediately instead of waiting for the next broadcast (the one-time initial
+  // state may have been sent before we subscribed). Re-runs on reconnect.
+  // Guard against regressing a newer state already pushed over the socket.
+  useEffect(() => {
+    if (status !== 'subscribed') return;
+    let cancelled = false;
+    getMatchState(matchId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.roster?.length) setCurrentRoster(res.roster);
+        if (res.state) {
+          setState((cur) =>
+            cur && (res.state!.log?.length ?? 0) < (cur.log?.length ?? 0)
+              ? cur
+              : res.state
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [status, matchId]);
 
   // Send a move; surface 422 errors as feedback.
   const dispatch = useCallback(
