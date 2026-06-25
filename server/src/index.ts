@@ -23,6 +23,14 @@ const PORT = Number(process.env.PORT ?? 3001);
 const INTERNAL_SECRET =
   process.env.INTERNAL_SECRET ?? 'dev-kadi-secret-change-me';
 
+// Timestamped structured log line (stdout -> the Forge daemon log file).
+function log(level: 'INFO' | 'WARN' | 'ERROR', msg: string, ctx?: unknown): void {
+  const line = `${new Date().toISOString()} [engine] ${level} ${msg}`;
+  const out = ctx === undefined ? line : `${line} ${JSON.stringify(ctx)}`;
+  if (level === 'ERROR') console.error(out);
+  else console.log(out);
+}
+
 export function createApp(secret: string = INTERNAL_SECRET) {
   const app = express();
   app.use(express.json());
@@ -30,9 +38,30 @@ export function createApp(secret: string = INTERNAL_SECRET) {
   // Shared-secret guard. Laravel is the only caller; clients never touch this.
   app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.header('X-Internal-Secret') !== secret) {
+      log('WARN', 'rejected request (bad secret)', {
+        path: req.path,
+        ip: req.ip,
+      });
       res.status(403).json({ error: 'Forbidden.' });
       return;
     }
+    next();
+  });
+
+  // Request logging: one line per request on completion, with key context.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const move = b.move as { type?: string } | undefined;
+      log(res.statusCode >= 400 ? 'WARN' : 'INFO', `${req.method} ${req.path}`, {
+        status: res.statusCode,
+        ms: Date.now() - start,
+        ...(b.userId ? { userId: b.userId } : {}),
+        ...(b.hostUserId ? { hostUserId: b.hostUserId } : {}),
+        ...(move?.type ? { move: move.type } : {}),
+      });
+    });
     next();
   });
 
@@ -98,10 +127,18 @@ export function createApp(secret: string = INTERNAL_SECRET) {
   app.use(
     (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
       if (err instanceof EngineApiError) {
+        log('WARN', `engine rejected: ${err.message}`, {
+          status: err.status,
+          path: _req.path,
+        });
         res.status(err.status).json({ error: err.message });
         return;
       }
-      console.error('[kadi] unhandled error:', err);
+      log('ERROR', 'unhandled error', {
+        path: _req.path,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
       res.status(500).json({ error: 'Server error.' });
     }
   );
@@ -117,6 +154,6 @@ const isMain =
 if (isMain) {
   const app = createApp();
   app.listen(PORT, '127.0.0.1', () => {
-    console.log(`[kadi] private engine listening on http://127.0.0.1:${PORT}`);
+    log('INFO', `private engine listening on http://127.0.0.1:${PORT}`);
   });
 }
