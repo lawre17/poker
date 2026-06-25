@@ -17,6 +17,7 @@ import type { AddressInfo } from 'node:net';
 import { decideMove } from '../../src/game/ai.js';
 import type { GameState, Move } from '../../src/game/types';
 import { createApp } from '../src/index.js';
+import { pruneRooms } from '../src/rooms.js';
 
 const SECRET = 'test-secret-123';
 
@@ -238,6 +239,17 @@ async function main(): Promise<void> {
     sawMultiState,
     'a single human move returned multiple states (human + AI follow-up)'
   );
+
+  // ---- 4. prune reclaims finished/idle rooms ----
+  console.log('\n[case C] pruneRooms reclaims idle rooms');
+  // The finished case-A match is still fetchable before pruning.
+  const beforePrune = await call('GET', `/matches/${matchId}/state`);
+  assert(beforePrune.status === 200, `state before prune -> 200 (got ${beforePrune.status})`);
+  // idleMs=0 prunes every room (all are idle by >0ms).
+  const pruned = pruneRooms(0);
+  assert(pruned >= 1, `pruneRooms(0) removed at least 1 room (got ${pruned})`);
+  const afterPrune = await call('GET', `/matches/${matchId}/state`);
+  assert(afterPrune.status === 404, `state after prune -> 404 (got ${afterPrune.status})`);
 
   server.close();
 

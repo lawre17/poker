@@ -39,6 +39,7 @@ export interface Room {
   settings: GameSettings;
   hostUserId: string;
   phase: RoomPhase;
+  lastActivityAt: number; // epoch ms; bumped on every room-touching op (for pruning)
 }
 
 // An entry in the roster returned to Laravel.
@@ -137,6 +138,7 @@ export function createRoom(opts: {
     settings: opts.settings ?? DEFAULT_SETTINGS,
     hostUserId: opts.hostUserId,
     phase: 'lobby',
+    lastActivityAt: Date.now(),
   };
 
   // Host takes seat 0.
@@ -177,6 +179,7 @@ export function joinRoom(
 ): JoinRoomResult {
   const room = getRoom(code);
   if (!room) throw new EngineApiError('Room not found.', 404);
+  room.lastActivityAt = Date.now();
   if (room.phase !== 'lobby') {
     throw new EngineApiError('Game already started.', 409);
   }
@@ -224,6 +227,7 @@ export function startGame(
   // their short join code — accept either.
   const room = getRoom(codeOrMatchId) ?? getRoomByMatch(codeOrMatchId);
   if (!room) throw new EngineApiError('Room not found.', 404);
+  room.lastActivityAt = Date.now();
   if (room.hostUserId !== userId) {
     throw new EngineApiError('Only the host can start the game.', 403);
   }
@@ -290,6 +294,7 @@ export function applyHumanMove(
 ): MoveResult {
   const room = getRoomByMatch(matchId);
   if (!room) throw new EngineApiError('Match not found.', 404);
+  room.lastActivityAt = Date.now();
   if (!room.state || room.phase !== 'playing') {
     throw new EngineApiError('Game is not in progress.', 409);
   }
@@ -368,7 +373,26 @@ export function getState(matchId: string): StateResult {
   if (!room || !room.state) {
     throw new EngineApiError('Match not found.', 404);
   }
+  room.lastActivityAt = Date.now();
   return { state: room.state, roster: roster(room) };
+}
+
+// Remove rooms idle for longer than idleMs from BOTH indexes and return the
+// count pruned. Bounded-memory guard: finished/abandoned games are never
+// removed by gameplay, so without this the maps grow forever. The 30-min
+// default keeps active and recently-finished games (so clients can still fetch
+// the final state) while reclaiming old/abandoned ones.
+export function pruneRooms(idleMs = 30 * 60 * 1000): number {
+  const now = Date.now();
+  let pruned = 0;
+  for (const [code, room] of rooms) {
+    if (now - room.lastActivityAt > idleMs) {
+      rooms.delete(code);
+      matchIndex.delete(room.matchId);
+      pruned++;
+    }
+  }
+  return pruned;
 }
 
 // Exposed for tests / introspection.

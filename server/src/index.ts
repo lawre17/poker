@@ -16,6 +16,7 @@ import {
   EngineApiError,
   getState,
   joinRoom,
+  pruneRooms,
   startGame,
 } from './rooms.js';
 
@@ -156,4 +157,14 @@ if (isMain) {
   app.listen(PORT, '127.0.0.1', () => {
     log('INFO', `private engine listening on http://127.0.0.1:${PORT}`);
   });
+
+  // Reclaim memory from finished/abandoned rooms. Only runs in the daemon (not
+  // in createApp) so importing the app in tests never starts a timer.
+  setInterval(
+    () => {
+      const n = pruneRooms();
+      if (n > 0) log('INFO', `pruned ${n} idle room(s)`);
+    },
+    5 * 60 * 1000
+  );
 }
