@@ -208,26 +208,50 @@ export function applyMove(prev: GameState, move: Move): GameState {
     return state;
   }
 
-  if (player.hand.length === 1 && !state.announcedKadi[player.id]) {
-    throw new Error('You must announce "Kadi" before playing your last card.');
-  }
-
   // Remove from hand, place on discard.
   player.hand = player.hand.filter((c) => c.id !== card.id);
   state.discardPile.push(card);
   log(state, `${player.name} plays ${cardLabel(card)}.`);
 
-  // Win check (card is guaranteed non-special by isPlayable).
+  // Emptying the hand wins only on a valid finish (non-special last card, Kadi
+  // declared, and nobody else already cardless). Otherwise the play is allowed
+  // but the player goes "cardless" — its power still fires (e.g. a lone Ace
+  // still blocks a pending penalty) — and they must pick a card next turn.
   if (player.hand.length === 0) {
-    state.phase = 'finished';
-    state.winnerId = player.id;
-    log(state, `${player.name} wins! 🎉`);
+    if (isValidWin(state, player, card)) {
+      state.phase = 'finished';
+      state.winnerId = player.id;
+      log(state, `${player.name} wins! 🎉`);
+      return state;
+    }
+    const step = applyOneCardEffect(state, player, card, true, move.chosenSuit);
+    log(
+      state,
+      `${player.name} is now cardless — they must pick a card next turn.`
+    );
+    finishTurn(state, player, step);
     return state;
   }
 
   const step = applyOneCardEffect(state, player, card, true, move.chosenSuit);
   finishTurn(state, player, step);
   return state;
+}
+
+// A play that empties the hand WINS only if all hold: the last card is
+// non-special, the player had declared "Kadi", and no OTHER player is currently
+// cardless. While any player is cardless, nobody can win.
+function isValidWin(state: GameState, player: Player, last: Card): boolean {
+  return (
+    !isSpecial(last.rank) &&
+    state.announcedKadi[player.id] &&
+    noOtherCardless(state, player)
+  );
+}
+
+// True when no player other than `player` is currently cardless (0 cards).
+function noOtherCardless(state: GameState, player: Player): boolean {
+  return state.players.every((p) => p.id === player.id || p.hand.length > 0);
 }
 
 // Lay down a connected run of cards in one turn. Every card's power fires in
@@ -260,28 +284,32 @@ function applySequence(
     }
   }
 
-  // A throw that empties the hand is a win — but only on a non-special last
-  // card and only if "Kadi" was declared on an earlier turn.
-  const willWin = cards.length === player.hand.length;
-  if (willWin) {
-    const last = cards[cards.length - 1];
-    if (isSpecial(last.rank)) {
-      throw new Error('A winning throw must end on a plain card.');
-    }
-    if (!state.announcedKadi[player.id]) {
-      throw new Error('You must declare "Kadi" before going out.');
-    }
-  }
-
   const ids = new Set(cardIds);
   player.hand = player.hand.filter((c) => !ids.has(c.id));
   for (const c of cards) state.discardPile.push(c);
   log(state, `${player.name} throws ${cards.map(cardLabel).join(', ')}.`);
 
+  // A throw that empties the hand wins only on a valid finish (non-special last
+  // card, Kadi declared, nobody else cardless). Otherwise the throw is allowed
+  // but the player goes cardless — every card's power still fires first.
   if (player.hand.length === 0) {
-    state.phase = 'finished';
-    state.winnerId = player.id;
-    log(state, `${player.name} wins! 🎉`);
+    const last = cards[cards.length - 1];
+    if (isValidWin(state, player, last)) {
+      state.phase = 'finished';
+      state.winnerId = player.id;
+      log(state, `${player.name} wins! 🎉`);
+      return state;
+    }
+    let step = 1;
+    for (let i = 0; i < cards.length; i++) {
+      const isLast = i === cards.length - 1;
+      step = applyOneCardEffect(state, player, cards[i], isLast, chosenSuit);
+    }
+    log(
+      state,
+      `${player.name} is now cardless — they must pick a card next turn.`
+    );
+    finishTurn(state, player, step);
     return state;
   }
 

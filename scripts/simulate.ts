@@ -44,6 +44,10 @@ for (const numPlayers of [2, 3, 4, 5]) {
       if (!state.announcedKadi[winner.id]) {
         throw new Error('Winner had not declared Kadi!');
       }
+      // Nobody may win while another player is cardless (0 cards).
+      if (state.players.some((p) => p.id !== winner.id && p.hand.length === 0)) {
+        throw new Error('Win while another player is cardless!');
+      }
       // No skip should be left dangling and nobody owes a declaration.
       if (state.skipCount !== 0 || state.awaitingAnnounce) {
         throw new Error('Game ended in an inconsistent skip/announce state.');

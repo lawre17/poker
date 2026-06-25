@@ -74,6 +74,14 @@ export function decideMove(state: GameState): Move {
     }
   }
 
+  // Never voluntarily go cardless: if down to a single card and no valid
+  // winning play fired above, drawing is the only non-losing move. (This also
+  // covers the lone-Ace penalty case — draw/pick the penalty instead of
+  // offloading the Ace into a cardless state.)
+  if (player.hand.length === 1) {
+    return { type: 'draw' };
+  }
+
   const playable = playableCards(state, player.hand);
 
   if (playable.length === 0) {

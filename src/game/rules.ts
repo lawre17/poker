@@ -32,18 +32,12 @@ export function topCard(state: GameState): Card {
  *  2. Open question     -> only a card of the question's suit.
  *  3. Normal play       -> match active suit, or match rank, or play an Ace (wild).
  *
- * The "you cannot finish on a special card" rule is enforced here too: if playing
- * this card would empty the player's hand and the card is special, it's illegal.
+ * Playing the last card is always allowed by the normal matching rules. Whether
+ * it WINS is decided in the engine: an invalid finish (special card, or no Kadi
+ * declared) simply leaves the player "cardless" instead of winning.
  */
 export function isPlayable(state: GameState, card: Card): boolean {
   const top = topCard(state);
-  const player = state.players[state.currentPlayerIndex];
-  const wouldEmptyHand = player.hand.length === 1;
-
-  // Cannot win on a special card.
-  if (wouldEmptyHand && isSpecial(card.rank)) return false;
-  // Cannot go out on your last card unless you've declared "Kadi".
-  if (wouldEmptyHand && !state.announcedKadi[player.id]) return false;
 
   // 0. Under a Jack skip — only another Jack bounces it onward.
   if (state.skipCount > 0) {
