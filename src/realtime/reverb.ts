@@ -23,11 +23,17 @@ export interface AwardedPayload {
   winnerUserId: number | null;
   coins: number;
 }
+export interface VoicePayload {
+  fromUserId: string | number;
+  fromName: string;
+  url: string;
+}
 
 export interface ReverbCallbacks {
   onGameState?: (payload: GameStatePayload) => void;
   onRoomState?: (payload: RoomStatePayload) => void;
   onAwarded?: (payload: AwardedPayload) => void;
+  onVoice?: (payload: VoicePayload) => void;
   onStatus?: (status: 'connecting' | 'connected' | 'subscribed' | 'closed') => void;
 }
 
@@ -120,6 +126,11 @@ export class ReverbClient {
       case 'awarded': {
         const payload = this.parseData<AwardedPayload>(msg.data);
         if (payload) this.callbacks.onAwarded?.(payload);
+        return;
+      }
+      case 'voice': {
+        const payload = this.parseData<VoicePayload>(msg.data);
+        if (payload) this.callbacks.onVoice?.(payload);
         return;
       }
       default:

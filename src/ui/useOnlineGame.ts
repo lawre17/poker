@@ -1,11 +1,21 @@
+import {
+  AudioModule,
+  RecordingPresets,
+  createAudioPlayer,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api/client';
 import { useAuth } from '../api/auth';
-import { getMatchState, Roster, sendMove } from '../api/matches';
+import { getMatchState, Roster, sendMove, sendVoice } from '../api/matches';
 import { ReverbClient } from '../realtime/reverb';
 import { GameState, Move, Suit } from '../game/types';
 import { initSounds, playSound } from './sound';
+
+// Auto-stop a held recording after this long so a stuck press can't run forever.
+const MAX_RECORD_MS = 15000;
 
 export type ConnStatus =
   | 'connecting'
@@ -38,9 +48,21 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [currentRoster, setCurrentRoster] = useState<Roster>(roster);
 
+  // Push-to-talk: who's currently speaking (cleared after ~3s) and whether the
+  // local user is recording / uploading right now.
+  const [lastVoiceFrom, setLastVoiceFrom] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [sendingVoice, setSendingVoice] = useState(false);
+
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+
   const clientRef = useRef<ReverbClient | null>(null);
   const fbTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevState = useRef<GameState | null>(null);
+  const voiceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Remote-clip players are kept alive until playback finishes, then released.
+  const voicePlayers = useRef<{ remove: () => void }[]>([]);
 
   // Map the signed-in user to their engine id (e.g. 'p1') for GameScreen.
   const selfEntry = currentRoster.find(
@@ -99,6 +121,14 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
         // Coins changed on the server — refresh the wallet.
         void refreshMe();
       },
+      onVoice: ({ fromUserId, fromName, url }) => {
+        // Never play back our OWN message.
+        if (user != null && String(fromUserId) === String(user.id)) return;
+        playRemoteVoice(url);
+        setLastVoiceFrom(fromName);
+        if (voiceTimer.current) clearTimeout(voiceTimer.current);
+        voiceTimer.current = setTimeout(() => setLastVoiceFrom(null), 3000);
+      },
       onStatus: (s) => setStatus(s),
     });
     clientRef.current = client;
@@ -107,7 +137,7 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
       client.close();
       clientRef.current = null;
     };
-  }, [matchId, token, refreshMe]);
+  }, [matchId, token, refreshMe, user]);
 
   // Once subscribed, fetch the current authoritative state so we render
   // immediately instead of waiting for the next broadcast (the one-time initial
@@ -133,6 +163,92 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
       cancelled = true;
     };
   }, [status, matchId]);
+
+  // --- Push-to-talk ---------------------------------------------------------
+
+  // Play a remote clip from its URL, releasing the player once it ends.
+  const playRemoteVoice = useCallback((url: string) => {
+    try {
+      const player = createAudioPlayer({ uri: url });
+      const sub = player.addListener('playbackStatusUpdate', (s) => {
+        if (s.didJustFinish) {
+          sub.remove();
+          try {
+            player.remove();
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+      voicePlayers.current.push(sub);
+      player.play();
+    } catch {
+      // ignore — a single clip failing to play shouldn't disrupt the game.
+    }
+  }, []);
+
+  const stopRecording = useCallback(async () => {
+    if (autoStopTimer.current) {
+      clearTimeout(autoStopTimer.current);
+      autoStopTimer.current = null;
+    }
+    if (!recording) return;
+    setRecording(false);
+    try {
+      await recorder.stop();
+    } catch {
+      return;
+    }
+    const uri = recorder.uri;
+    if (!uri) return;
+    setSendingVoice(true);
+    try {
+      await sendVoice(matchId, uri);
+    } catch {
+      showFeedback('Could not send voice — check your connection.');
+    } finally {
+      setSendingVoice(false);
+    }
+  }, [recording, recorder, matchId, showFeedback]);
+
+  const startRecording = useCallback(async () => {
+    if (recording || sendingVoice) return;
+    try {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm.granted) {
+        showFeedback('Microphone permission is needed to talk.');
+        return;
+      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setRecording(true);
+      hapticLight();
+      // Safety auto-stop so a stuck press can't record indefinitely.
+      autoStopTimer.current = setTimeout(() => {
+        void stopRecording();
+      }, MAX_RECORD_MS);
+    } catch {
+      setRecording(false);
+      showFeedback('Could not start recording.');
+    }
+  }, [recording, sendingVoice, recorder, showFeedback, stopRecording]);
+
+  // Tear down any pending timers / players on unmount.
+  useEffect(() => {
+    return () => {
+      if (voiceTimer.current) clearTimeout(voiceTimer.current);
+      if (autoStopTimer.current) clearTimeout(autoStopTimer.current);
+      voicePlayers.current.forEach((s) => {
+        try {
+          s.remove();
+        } catch {
+          /* ignore */
+        }
+      });
+      voicePlayers.current = [];
+    };
+  }, []);
 
   // Send a move; surface 422 errors as feedback.
   const dispatch = useCallback(
@@ -202,5 +318,11 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     skipTurn,
     announceKadi,
     exit,
+    // Push-to-talk
+    lastVoiceFrom,
+    recording,
+    sendingVoice,
+    startRecording,
+    stopRecording,
   };
 }

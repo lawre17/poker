@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Roster } from '../api/matches';
 import { GameScreen } from './GameScreen';
+import { VoiceButton } from './VoiceButton';
 import { useOnlineGame } from './useOnlineGame';
 import { colors } from './theme';
 
@@ -24,6 +25,11 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
     skipTurn,
     announceKadi,
     exit,
+    lastVoiceFrom,
+    recording,
+    sendingVoice,
+    startRecording,
+    stopRecording,
   } = useOnlineGame({ matchId, roster, onExit });
 
   // Until the first gameState arrives, show a connecting placeholder.
@@ -46,21 +52,31 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
   }
 
   return (
-    <GameScreen
-      state={state}
-      feedback={feedback}
-      selfId={selfId}
-      onPlay={playCard}
-      onPlaySequence={playSequence}
-      onDraw={draw}
-      onSkipTurn={skipTurn}
-      onAnnounceKadi={announceKadi}
-      onExit={exit}
-    />
+    <View style={styles.fill}>
+      <GameScreen
+        state={state}
+        feedback={feedback}
+        selfId={selfId}
+        onPlay={playCard}
+        onPlaySequence={playSequence}
+        onDraw={draw}
+        onSkipTurn={skipTurn}
+        onAnnounceKadi={announceKadi}
+        onExit={exit}
+      />
+      <VoiceButton
+        recording={recording}
+        sending={sendingVoice}
+        speakingName={lastVoiceFrom}
+        onStart={startRecording}
+        onStop={stopRecording}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
   root: { flex: 1, backgroundColor: colors.felt },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 18 },
   status: { color: colors.text, fontSize: 16, fontWeight: '700' },

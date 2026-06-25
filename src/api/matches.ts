@@ -1,5 +1,5 @@
 import { GameSettings, GameState, Move } from '../game/types';
-import { apiFetch } from './client';
+import { apiFetch, apiUpload } from './client';
 
 export interface RosterEntry {
   // Human seats carry the numeric user id; AI seats carry a string token like
@@ -81,4 +81,20 @@ export interface MatchStateResponse {
 // immediately instead of waiting for the next broadcast.
 export function getMatchState(matchId: string): Promise<MatchStateResponse> {
   return apiFetch<MatchStateResponse>(`/matches/${matchId}/state`);
+}
+
+// Upload a short push-to-talk voice clip (recorded as m4a/AAC). The server
+// stores it and broadcasts the URL to the room over Reverb.
+export function sendVoice(
+  matchId: string,
+  fileUri: string
+): Promise<{ url: string }> {
+  const form = new FormData();
+  // RN's fetch accepts this {uri,name,type} shape for file parts.
+  form.append('clip', {
+    uri: fileUri,
+    name: 'clip.m4a',
+    type: 'audio/m4a',
+  } as unknown as Blob);
+  return apiUpload<{ url: string }>(`/matches/${matchId}/voice`, form);
 }

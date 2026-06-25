@@ -117,3 +117,46 @@ export async function apiFetch<T>(
 }
 
 export const API_BASE = BASE;
+
+// --- Multipart upload -------------------------------------------------------
+
+// Upload FormData (e.g. a recorded audio clip). Unlike apiFetch we must NOT set
+// Content-Type — fetch sets the multipart boundary itself when given FormData.
+export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const bearer = await getToken();
+  if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
+
+  const url = path.startsWith('http') ? path : `${BASE}${path}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'POST', headers, body: form });
+  } catch {
+    throw new ApiError(
+      'Network error — check your connection and try again.',
+      0
+    );
+  }
+
+  let data: unknown = null;
+  const text = await res.text();
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+
+  if (!res.ok) {
+    const obj = (data ?? {}) as { message?: string; errors?: FieldErrors };
+    throw new ApiError(
+      obj.message ?? 'Upload failed. Please try again.',
+      res.status,
+      obj.errors
+    );
+  }
+
+  return data as T;
+}
