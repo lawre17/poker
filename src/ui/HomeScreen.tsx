@@ -8,14 +8,17 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../api/auth';
 import { NewGameOptions } from './useGame';
 import { colors } from './theme';
 
 interface Props {
   onStart: (opts: NewGameOptions) => void;
+  onPlayOnline: () => void;
 }
 
-export function HomeScreen({ onStart }: Props) {
+export function HomeScreen({ onStart, onPlayOnline }: Props) {
+  const { user, logout } = useAuth();
   const [opponents, setOpponents] = useState(2);
   const [stacking, setStacking] = useState(false);
   const [assisted, setAssisted] = useState(true);
@@ -23,8 +26,21 @@ export function HomeScreen({ onStart }: Props) {
   return (
     <SafeAreaView style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Account header: wallet + sign out */}
+        <View style={styles.header}>
+          <View style={styles.wallet}>
+            <Text style={styles.walletItem}>🪙 {user?.coins ?? 0}</Text>
+            <Text style={styles.walletItem}>🏆 {user?.wins ?? 0}</Text>
+          </View>
+          <Pressable onPress={logout} hitSlop={8}>
+            <Text style={styles.logout}>Logout</Text>
+          </Pressable>
+        </View>
+
         <Text style={styles.brand}>KADI</Text>
-        <Text style={styles.subtitle}>The card game · vs AI</Text>
+        <Text style={styles.subtitle}>
+          {user ? `Hi ${user.name}` : 'The card game'}
+        </Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>Opponents</Text>
@@ -91,7 +107,11 @@ export function HomeScreen({ onStart }: Props) {
             })
           }
         >
-          <Text style={styles.playText}>Play ▶</Text>
+          <Text style={styles.playText}>Play vs AI ▶</Text>
+        </Pressable>
+
+        <Pressable style={styles.playOnline} onPress={onPlayOnline}>
+          <Text style={styles.playOnlineText}>Play Online 🌐</Text>
         </Pressable>
 
         <View style={styles.rules}>
@@ -111,6 +131,25 @@ export function HomeScreen({ onStart }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.felt },
   content: { padding: 24, alignItems: 'center' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  wallet: { flexDirection: 'row', gap: 16 },
+  walletItem: { color: colors.gold, fontWeight: '800', fontSize: 16 },
+  logout: { color: colors.textMuted, fontWeight: '700', fontSize: 15 },
+  playOnline: {
+    backgroundColor: colors.feltDark,
+    borderWidth: 2,
+    borderColor: colors.gold,
+    paddingVertical: 14,
+    paddingHorizontal: 50,
+    borderRadius: 30,
+    marginTop: 14,
+  },
+  playOnlineText: { color: colors.gold, fontSize: 18, fontWeight: '900' },
   brand: {
     fontSize: 64,
     fontWeight: '900',

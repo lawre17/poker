@@ -34,6 +34,10 @@ interface Props {
   onSkipTurn: () => void;
   onAnnounceKadi: () => void;
   onExit: () => void;
+  // The engine id of the local player whose hand should be shown. Defaults to
+  // the offline human ('you') so the single-player flow is unchanged; online
+  // play passes the local player's engine id (e.g. 'p1').
+  selfId?: string;
 }
 
 type AcePicker = null | { mode: 'single'; cardId: string } | { mode: 'commit' };
@@ -47,14 +51,16 @@ export function GameScreen({
   onSkipTurn,
   onAnnounceKadi,
   onExit,
+  selfId = HUMAN_ID,
 }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [acePicker, setAcePicker] = useState<AcePicker>(null);
 
-  const human = state.players.find((p) => p.id === HUMAN_ID)!;
-  const opponents = state.players.filter((p) => p.id !== HUMAN_ID);
+  const human =
+    state.players.find((p) => p.id === selfId) ?? state.players[0];
+  const opponents = state.players.filter((p) => p.id !== human.id);
   const current = state.players[state.currentPlayerIndex];
-  const isHumanTurn = current.id === HUMAN_ID && state.phase === 'playing';
+  const isHumanTurn = current.id === human.id && state.phase === 'playing';
   const top = topCard(state);
   const cleanTurn = canStartSequence(state); // may build a multi-card throw
   const assisted = state.settings.assistedMode;
@@ -88,7 +94,7 @@ export function GameScreen({
   // A selection that uses the whole hand is a winning throw — in assisted mode
   // we block it until "Kadi" is declared; in manual mode the engine rejects it.
   const selectionWins = selected.length > 0 && selected.length === human.hand.length;
-  const blockedWin = assisted && selectionWins && !state.announcedKadi[HUMAN_ID];
+  const blockedWin = assisted && selectionWins && !state.announcedKadi[human.id];
 
   const handlePress = (card: Card) => {
     if (!isHumanTurn || state.awaitingAnnounce) return;
@@ -122,7 +128,7 @@ export function GameScreen({
   };
 
   // Declaring is always available on your turn until you've declared.
-  const canAnnounce = isHumanTurn && !state.announcedKadi[HUMAN_ID];
+  const canAnnounce = isHumanTurn && !state.announcedKadi[human.id];
 
   const [muted, setMutedState] = useState(getMuted());
   const toggleMute = () => {
@@ -323,7 +329,7 @@ export function GameScreen({
         <View style={styles.handHeader}>
           <Text style={styles.handTitle}>
             {human.name} · {human.hand.length} cards
-            {state.announcedKadi[HUMAN_ID] ? ' · Kadi!' : ''}
+            {state.announcedKadi[human.id] ? ' · Kadi!' : ''}
           </Text>
           {canAnnounce && (
             <Animated.View style={{ transform: [{ scale: pulse }] }}>
@@ -427,7 +433,7 @@ export function GameScreen({
             style={[styles.winOverlay, { transform: [{ scale: winPop }] }]}
           >
             <Text style={styles.winTitle}>
-              {state.winnerId === HUMAN_ID
+              {state.winnerId === human.id
                 ? '🎉 You win!'
                 : `${state.players.find((p) => p.id === state.winnerId)?.name} wins`}
             </Text>
