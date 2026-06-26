@@ -1,6 +1,9 @@
-// Verifies the "Niko Kadi" win rule: a player holding a winning play must first
-// DECLARE (which passes the turn, warning opponents), and can only finish on a
-// LATER turn — never the same turn they declare. Run: npx tsx scripts/kadi-win.test.ts
+// Verifies the "Niko Kadi" win rule:
+//  - declaring is available any time on your turn and does NOT end the turn,
+//  - you CANNOT empty your hand / win on the same turn you declare,
+//  - you win on a LATER turn by playing out your cards,
+//  - being skipped does NOT lose your declared status.
+// Run: npx tsx scripts/kadi-win.test.ts
 import { applyMove, createGame } from '../src/game/engine';
 import { Card, GameState } from '../src/game/types';
 
@@ -12,40 +15,72 @@ function assert(c: boolean, m: string): void {
   console.log('ok:', m);
 }
 
-let s: GameState = createGame([
-  { id: 'p0', name: 'A', isAI: false },
-  { id: 'p1', name: 'B', isAI: false },
-]);
-const suit = s.activeSuit;
+const card = (id: string, rank: string, suit: string): Card =>
+  ({ id, rank, suit } as Card);
 
-// p1 plays a plain matching card to pass the turn to p0 (and keeps spares so it
-// is not itself forced to declare). p0 holds a single plain winning card.
-s.players[1].hand = [
-  { id: 'pass', rank: '9', suit } as Card,
-  { id: 'b2', rank: '5', suit } as Card,
-  { id: 'b3', rank: '4', suit } as Card,
-];
-s.players[0].hand = [{ id: 'win', rank: '7', suit } as Card];
-s.currentPlayerIndex = 1;
+function fresh(): { s: GameState; suit: string } {
+  const s = createGame([
+    { id: 'p0', name: 'A', isAI: false },
+    { id: 'p1', name: 'B', isAI: false },
+  ]);
+  return { s, suit: s.activeSuit };
+}
 
-s = applyMove(s, { type: 'play', cardId: 'pass' });
-assert(s.currentPlayerIndex === 0, 'turn passed to p0');
-assert(s.awaitingAnnounce === true, 'p0 is forced to declare (winning play in hand)');
+// --- declare is available with >1 card and does NOT end the turn ---
+{
+  let { s, suit } = fresh();
+  s.players[0].hand = [card('c7', '7', suit), card('c5', '5', suit)];
+  s.players[1].hand = [card('b9', '9', suit), card('bx', '6', suit)];
+  s.currentPlayerIndex = 0;
 
-const blocked = applyMove(s, { type: 'play', cardId: 'win' });
-assert(blocked === s, 'playing the winning card is rejected before declaring');
+  s = applyMove(s, { type: 'announceKadi' });
+  assert(s.announcedKadi['p0'] === true, 'can declare with 2 cards');
+  assert(s.declaredThisTurn === true, 'declaredThisTurn set');
+  assert(s.currentPlayerIndex === 0, 'declaring does NOT end your turn');
 
-s = applyMove(s, { type: 'announceKadi' });
-assert(s.announcedKadi['p0'] === true, 'p0 announced');
-assert(s.phase === 'playing', 'declaring does not win immediately');
-assert(s.currentPlayerIndex === 1, 'declaring passed the turn to p1 (opponents may react)');
+  // Play one card the same turn — allowed, status kept (declaration turn).
+  s = applyMove(s, { type: 'play', cardId: 'c7' });
+  assert(s.currentPlayerIndex === 1, 'playing after declaring passes the turn');
+  assert(s.announcedKadi['p0'] === true, 'status kept after the declaration-turn play');
 
-s = applyMove(s, { type: 'play', cardId: 'b2' });
-assert(s.currentPlayerIndex === 0, 'turn back to p0');
-assert(s.awaitingAnnounce === false, 'p0 already declared — no re-declare');
+  // p1 plays, turn back to p0.
+  s = applyMove(s, { type: 'play', cardId: 'b9' });
+  assert(s.currentPlayerIndex === 0, 'turn back to p0');
+  assert(s.declaredThisTurn === false, 'declaredThisTurn cleared after the turn moved on');
 
-s = applyMove(s, { type: 'play', cardId: 'win' });
-assert(s.phase === 'finished', 'p0 wins on the next turn');
-assert(s.winnerId === 'p0', 'winner is p0');
+  // p0 plays the last card → win.
+  s = applyMove(s, { type: 'play', cardId: 'c5' });
+  assert(s.phase === 'finished' && s.winnerId === 'p0', 'p0 wins on a LATER turn');
+}
 
-console.log('\nPASS: declare-then-win-next-turn rule verified.');
+// --- you CANNOT win the same turn you declare ---
+{
+  let { s, suit } = fresh();
+  s.players[0].hand = [card('w', '7', suit)]; // single plain matching card
+  s.players[1].hand = [card('b1', '9', suit), card('b2', '6', suit)];
+  s.currentPlayerIndex = 0;
+
+  s = applyMove(s, { type: 'announceKadi' });
+  // Try to go out immediately — must NOT win (becomes cardless instead).
+  s = applyMove(s, { type: 'play', cardId: 'w' });
+  assert(s.phase === 'playing', 'emptying your hand the turn you declare is NOT a win');
+  assert(s.winnerId === null, 'no winner on a same-turn-as-declare finish');
+  assert(s.players[0].hand.length === 0, 'p0 went cardless instead');
+}
+
+// --- being skipped keeps your declared status ---
+{
+  let { s, suit } = fresh();
+  s.players[0].hand = [card('x5', '5', suit)];
+  s.players[1].hand = [card('j', 'J', suit), card('n9', '9', suit)];
+  s.announcedKadi['p0'] = true; // declared on an earlier turn
+  s.declaredThisTurn = false;
+  s.currentPlayerIndex = 1;
+
+  s = applyMove(s, { type: 'play', cardId: 'j' }); // p1 plays a Jack -> p0 skipped
+  assert(s.skipCount === 1 && s.currentPlayerIndex === 0, 'Jack queued a skip onto p0');
+  s = applyMove(s, { type: 'skipTurn' }); // p0 accepts the skip
+  assert(s.announcedKadi['p0'] === true, 'being skipped does NOT lose Kadi status');
+}
+
+console.log('\nPASS: Niko Kadi declare/win/skip rules verified.');

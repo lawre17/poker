@@ -1,5 +1,5 @@
 import { GameSettings, GameState, Move } from '../game/types';
-import { apiFetch, apiUpload } from './client';
+import { apiFetch } from './client';
 
 export interface RosterEntry {
   // Human seats carry the numeric user id; AI seats carry a string token like
@@ -92,18 +92,21 @@ export function sendChat(matchId: string, text: string): Promise<{ ok: boolean }
   });
 }
 
-// Upload a short push-to-talk voice clip (recorded as m4a/AAC). The server
-// stores it and broadcasts the URL to the room over Reverb.
-export function sendVoice(
-  matchId: string,
-  fileUri: string
-): Promise<{ url: string }> {
-  const form = new FormData();
-  // RN's fetch accepts this {uri,name,type} shape for file parts.
-  form.append('clip', {
-    uri: fileUri,
-    name: 'clip.m4a',
-    type: 'audio/m4a',
-  } as unknown as Blob);
-  return apiUpload<{ url: string }>(`/matches/${matchId}/voice`, form);
+// Leave/forfeit a match. The engine ends a 2-player game in the other player's
+// favour, or skips the seat in a larger game.
+export function leaveMatch(matchId: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/matches/${matchId}/leave`, {
+    method: 'POST',
+  });
+}
+
+// Ask the server to skip the current player if they've stalled past the turn
+// timeout. A premature request is a harmless no-op (the server is the clock).
+export function pingTimeout(
+  matchId: string
+): Promise<{ ok: boolean; skipped: boolean }> {
+  return apiFetch<{ ok: boolean; skipped: boolean }>(
+    `/matches/${matchId}/timeout`,
+    { method: 'POST' }
+  );
 }

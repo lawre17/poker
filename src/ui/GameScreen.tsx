@@ -96,8 +96,8 @@ export function GameScreen({
 
   // Drop any in-progress selection when it's no longer our clean turn.
   useEffect(() => {
-    if (!isHumanTurn || !cleanTurn || state.awaitingAnnounce) setSelected([]);
-  }, [isHumanTurn, cleanTurn, state.awaitingAnnounce, state.currentPlayerIndex]);
+    if (!isHumanTurn || !cleanTurn) setSelected([]);
+  }, [isHumanTurn, cleanTurn, state.currentPlayerIndex]);
 
   const selectedCards = selected
     .map((id) => human.hand.find((c) => c.id === id))
@@ -123,10 +123,12 @@ export function GameScreen({
   // A selection that uses the whole hand is a winning throw — in assisted mode
   // we block it until "Kadi" is declared; in manual mode the engine rejects it.
   const selectionWins = selected.length > 0 && selected.length === human.hand.length;
-  const blockedWin = assisted && selectionWins && !state.announcedKadi[human.id];
+  // You can only go out if you declared on an EARLIER turn (not this one).
+  const canWinNow = state.announcedKadi[human.id] && !state.declaredThisTurn;
+  const blockedWin = assisted && selectionWins && !canWinNow;
 
   const handlePress = (card: Card) => {
-    if (!isHumanTurn || state.awaitingAnnounce) return;
+    if (!isHumanTurn) return;
     if (!cleanTurn) {
       // Single play: penalty counter, Ace block, skip bounce, or answer.
       if (assisted && !isPlayable(state, card)) return; // manual lets you try
@@ -157,9 +159,9 @@ export function GameScreen({
   };
 
   // Declaring is offered only when you actually hold a winning play (the engine
-  // sets awaitingAnnounce). Declaring passes your turn — opponents get one chance
-  // to block before you can finish on your next turn.
-  const canAnnounce = isHumanTurn && state.awaitingAnnounce;
+  // Declaring is always available on your turn until you've declared. It doesn't
+  // end your turn, but you can only WIN on a later turn.
+  const canAnnounce = isHumanTurn && !state.announcedKadi[human.id];
 
   const [muted, setMutedState] = useState(getMuted());
   const toggleMute = () => {
@@ -411,7 +413,7 @@ export function GameScreen({
       <View style={styles.table}>
         <View style={styles.pileRow}>
           <Pressable
-            onPress={() => isHumanTurn && !state.awaitingAnnounce && onDraw()}
+            onPress={() => isHumanTurn && onDraw()}
             style={styles.pileSlot}
           >
             <CardView faceDown size="lg" />
@@ -522,11 +524,7 @@ export function GameScreen({
             const selOrder = selected.indexOf(c.id);
             const isSel = selOrder >= 0;
             const addable =
-              assisted &&
-              isHumanTurn &&
-              !state.awaitingAnnounce &&
-              !isSel &&
-              canAddCard(c);
+              assisted && isHumanTurn && !isSel && canAddCard(c);
             const highlight = isSel || addable;
             const lift = isSel ? -34 : addable ? -16 : 0;
             const isDragging = dragId === c.id;
@@ -560,23 +558,7 @@ export function GameScreen({
         </View>
 
         {/* Interaction footer */}
-        {isHumanTurn && state.awaitingAnnounce && (
-          <View style={styles.declareBar}>
-            <Text style={styles.declareHint}>
-              You can win! Declare Niko Kadi to warn the table — you finish on
-              your next turn.
-            </Text>
-            <Animated.View
-              style={{ transform: [{ scale: pulse }], alignSelf: 'stretch' }}
-            >
-              <Pressable style={styles.declareBtn} onPress={onAnnounceKadi}>
-                <Text style={styles.declareBtnText}>🔔 Niko Kadi!</Text>
-              </Pressable>
-            </Animated.View>
-          </View>
-        )}
-
-        {isHumanTurn && !state.awaitingAnnounce && state.skipCount > 0 && (
+        {isHumanTurn && state.skipCount > 0 && (
           <View style={styles.skipRow}>
             {human.hand.some((c) => c.rank === 'J' && human.hand.length > 1) && (
               <Text style={styles.hint}>Play a Jack to bounce, or…</Text>
@@ -587,7 +569,7 @@ export function GameScreen({
           </View>
         )}
 
-        {isHumanTurn && !state.awaitingAnnounce && state.skipCount === 0 && (
+        {isHumanTurn && state.skipCount === 0 && (
           selected.length > 0 ? (
             <View style={styles.commitBar}>
               <Pressable onPress={() => setSelected([])} hitSlop={8}>
@@ -600,7 +582,9 @@ export function GameScreen({
               >
                 <Text style={styles.playBtnText}>
                   {blockedWin
-                    ? 'Declare Niko Kadi! first'
+                    ? state.announcedKadi[human.id]
+                      ? 'Win on your next turn'
+                      : 'Declare Niko Kadi! first'
                     : `Play${selected.length > 1 ? ` ${selected.length} cards` : ''} ▶`}
                 </Text>
               </Pressable>

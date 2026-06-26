@@ -16,8 +16,10 @@ import {
   EngineApiError,
   getState,
   joinRoom,
+  leaveRoom,
   pruneRooms,
   startGame,
+  timeoutMove,
 } from './rooms.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -115,6 +117,28 @@ export function createApp(secret: string = INTERNAL_SECRET) {
       return;
     }
     const result = applyHumanMove(String(req.params.matchId), String(userId), move);
+    res.json(result);
+  });
+
+  // POST /matches/:matchId/leave — a player forfeits/leaves the match.
+  app.post('/matches/:matchId/leave', (req: Request, res: Response) => {
+    const { userId } = req.body ?? {};
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required.' });
+      return;
+    }
+    const result = leaveRoom(String(req.params.matchId), String(userId));
+    res.json(result);
+  });
+
+  // POST /matches/:matchId/timeout — skip the current player if they've stalled.
+  app.post('/matches/:matchId/timeout', (req: Request, res: Response) => {
+    const { userId } = req.body ?? {};
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required.' });
+      return;
+    }
+    const result = timeoutMove(String(req.params.matchId), String(userId));
     res.json(result);
   });
 

@@ -1,8 +1,14 @@
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  ActiveMatch,
+  clearActiveMatch,
+  getActiveMatch,
+  setActiveMatch,
+} from './src/api/activeMatch';
 import { AuthProvider, useAuth } from './src/api/auth';
 import { GameScreen } from './src/ui/GameScreen';
 import { HomeScreen } from './src/ui/HomeScreen';
@@ -25,6 +31,28 @@ function AppContent() {
   const { token, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [route, setRoute] = useState<Route>({ name: 'home' });
+  // A game the player is mid-way through (persisted), offered as "Rejoin".
+  const [resume, setResume] = useState<ActiveMatch | null>(null);
+
+  useEffect(() => {
+    if (!token) {
+      setResume(null);
+      return;
+    }
+    void getActiveMatch().then(setResume);
+  }, [token]);
+
+  const enterGame = (match: OnlineMatch) => {
+    void setActiveMatch({ matchId: match.matchId, roster: match.roster });
+    setResume({ matchId: match.matchId, roster: match.roster });
+    setRoute({ name: 'online', match });
+  };
+
+  const leaveGame = () => {
+    void clearActiveMatch();
+    setResume(null);
+    setRoute({ name: 'home' });
+  };
 
   // Offline AI game (unchanged).
   const {
@@ -85,7 +113,7 @@ function AppContent() {
       <OnlineGameScreen
         matchId={route.match.matchId}
         roster={route.match.roster}
-        onExit={() => setRoute({ name: 'home' })}
+        onExit={leaveGame}
       />
     );
   }
@@ -95,7 +123,7 @@ function AppContent() {
     return (
       <LobbyScreen
         onExit={() => setRoute({ name: 'home' })}
-        onEnterGame={(match) => setRoute({ name: 'online', match })}
+        onEnterGame={enterGame}
       />
     );
   }
@@ -105,6 +133,9 @@ function AppContent() {
     <HomeScreen
       onStart={newGame}
       onPlayOnline={() => setRoute({ name: 'lobby' })}
+      resumeMatch={resume}
+      onResume={() => resume && setRoute({ name: 'online', match: resume })}
+      onForgetResume={leaveGame}
     />
   );
 }

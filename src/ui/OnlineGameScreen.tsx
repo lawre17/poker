@@ -1,10 +1,16 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Roster } from '../api/matches';
 import { ChatPanel } from './ChatPanel';
 import { GameScreen } from './GameScreen';
-import { VoiceButton } from './VoiceButton';
 import { useOnlineGame } from './useOnlineGame';
 import { colors } from './theme';
 
@@ -26,17 +32,29 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
     skipTurn,
     announceKadi,
     exit,
-    lastVoiceFrom,
-    recording,
-    sendingVoice,
-    startRecording,
-    stopRecording,
+    leave,
     messages,
     unreadChat,
     sendChatMessage,
     markChatRead,
     floats,
   } = useOnlineGame({ matchId, roster, onExit });
+
+  // Leaving an in-progress game forfeits it, so confirm first.
+  const confirmLeave = () => {
+    if (!state || state.phase === 'finished') {
+      leave();
+      return;
+    }
+    Alert.alert(
+      'Leave game?',
+      "You'll forfeit this match — in a 2-player game your opponent wins.",
+      [
+        { text: 'Keep playing', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: leave },
+      ]
+    );
+  };
 
   // Until the first gameState arrives, show a connecting placeholder.
   if (!state) {
@@ -68,15 +86,8 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
         onDraw={draw}
         onSkipTurn={skipTurn}
         onAnnounceKadi={announceKadi}
-        onExit={exit}
+        onExit={confirmLeave}
         floats={floats}
-      />
-      <VoiceButton
-        recording={recording}
-        sending={sendingVoice}
-        speakingName={lastVoiceFrom}
-        onStart={startRecording}
-        onStop={stopRecording}
       />
       <ChatPanel
         messages={messages}

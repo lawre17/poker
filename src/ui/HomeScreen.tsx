@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActiveMatch } from '../api/activeMatch';
 import { useAuth } from '../api/auth';
 import { NewGameOptions } from './useGame';
 import { colors } from './theme';
@@ -15,9 +16,18 @@ import { colors } from './theme';
 interface Props {
   onStart: (opts: NewGameOptions) => void;
   onPlayOnline: () => void;
+  resumeMatch?: ActiveMatch | null;
+  onResume?: () => void;
+  onForgetResume?: () => void;
 }
 
-export function HomeScreen({ onStart, onPlayOnline }: Props) {
+export function HomeScreen({
+  onStart,
+  onPlayOnline,
+  resumeMatch,
+  onResume,
+  onForgetResume,
+}: Props) {
   const { user, logout } = useAuth();
   const [opponents, setOpponents] = useState(2);
   const [stacking, setStacking] = useState(false);
@@ -41,6 +51,20 @@ export function HomeScreen({ onStart, onPlayOnline }: Props) {
         <Text style={styles.subtitle}>
           {user ? `Hi ${user.name}` : 'The card game'}
         </Text>
+
+        {resumeMatch && (
+          <View style={styles.resumeCard}>
+            <Text style={styles.resumeText}>You have a game in progress</Text>
+            <View style={styles.resumeRow}>
+              <Pressable style={styles.resumeBtn} onPress={onResume}>
+                <Text style={styles.resumeBtnText}>Rejoin ▶</Text>
+              </Pressable>
+              <Pressable onPress={onForgetResume} hitSlop={8}>
+                <Text style={styles.resumeDismiss}>Dismiss</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.label}>Opponents</Text>
@@ -150,6 +174,26 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   playOnlineText: { color: colors.gold, fontSize: 18, fontWeight: '900' },
+  resumeCard: {
+    width: '100%',
+    backgroundColor: colors.feltDark,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: colors.gold,
+    padding: 14,
+    marginBottom: 16,
+    gap: 10,
+  },
+  resumeText: { color: colors.text, fontWeight: '800', fontSize: 15 },
+  resumeRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  resumeBtn: {
+    backgroundColor: colors.gold,
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+  },
+  resumeBtnText: { color: colors.feltDark, fontWeight: '900', fontSize: 15 },
+  resumeDismiss: { color: colors.textMuted, fontWeight: '700' },
   brand: {
     fontSize: 64,
     fontWeight: '900',

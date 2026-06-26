@@ -1,10 +1,3 @@
-import {
-  AudioModule,
-  RecordingPresets,
-  createAudioPlayer,
-  setAudioModeAsync,
-  useAudioRecorder,
-} from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
@@ -12,17 +5,15 @@ import { ApiError } from '../api/client';
 import { useAuth } from '../api/auth';
 import {
   getMatchState,
+  leaveMatch,
+  pingTimeout,
   Roster,
   sendChat,
   sendMove,
-  sendVoice,
 } from '../api/matches';
 import { ReverbClient } from '../realtime/reverb';
 import { GameState, Move, Suit } from '../game/types';
 import { initSounds, playSound } from './sound';
-
-// Auto-stop a held recording after this long so a stuck press can't run forever.
-const MAX_RECORD_MS = 15000;
 
 export type ConnStatus =
   | 'connecting'
@@ -39,6 +30,9 @@ export interface ChatMsg {
 
 // Keep only the most recent messages in memory — chat is ephemeral.
 const MAX_CHAT = 50;
+// Ask the server to skip the current player after this long. The server is the
+// real clock (40s); we use a little more so a premature request can't race it.
+const TURN_TIMEOUT_MS = 42000;
 
 interface UseOnlineGameArgs {
   matchId: string;
@@ -65,12 +59,6 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [currentRoster, setCurrentRoster] = useState<Roster>(roster);
 
-  // Push-to-talk: who's currently speaking (cleared after ~3s) and whether the
-  // local user is recording / uploading right now.
-  const [lastVoiceFrom, setLastVoiceFrom] = useState<string | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [sendingVoice, setSendingVoice] = useState(false);
-
   // Text chat (ephemeral). messages holds a rolling window; unreadChat counts
   // messages received while the chat panel is closed.
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -82,22 +70,9 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
   );
   const floatSeq = useRef(0);
 
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-
   const clientRef = useRef<ReverbClient | null>(null);
   const fbTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevState = useRef<GameState | null>(null);
-  const voiceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Remote-clip players are kept alive until playback finishes, then released.
-  const voicePlayers = useRef<{ remove: () => void }[]>([]);
-  // Push-to-talk coordination. The button's press-in fires an async start
-  // (prepare->record); a quick release can land before recording actually
-  // begins, so we track intent (want) and the real recorder state (active) via
-  // refs to avoid stale closures and orphaned recordings.
-  const wantRecordingRef = useRef(false);
-  const recordingRef = useRef(false);
-  const micGrantedRef = useRef(false);
 
   // Map the signed-in user to their engine id (e.g. 'p1') for GameScreen.
   const selfEntry = currentRoster.find(
@@ -118,28 +93,6 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
 
   useEffect(() => {
     initSounds();
-  }, []);
-
-  // Pre-warm microphone permission and the recording audio mode once on mount so
-  // the first hold-to-talk press records instantly instead of being eaten by the
-  // permission dialog (the original cause of "recording doesn't work").
-  useEffect(() => {
-    let done = false;
-    (async () => {
-      try {
-        const perm = await AudioModule.requestRecordingPermissionsAsync();
-        if (done) return;
-        micGrantedRef.current = perm.granted;
-        if (perm.granted) {
-          await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-        }
-      } catch {
-        /* ignore — handled again lazily on first press */
-      }
-    })();
-    return () => {
-      done = true;
-    };
   }, []);
 
   // Sound effects for state transitions, mirroring useGame.
@@ -182,14 +135,6 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
       onAwarded: () => {
         // Coins changed on the server — refresh the wallet.
         void refreshMe();
-      },
-      onVoice: ({ fromUserId, fromName, url }) => {
-        // Never play back our OWN message.
-        if (user != null && String(fromUserId) === String(user.id)) return;
-        playRemoteVoice(url);
-        setLastVoiceFrom(fromName);
-        if (voiceTimer.current) clearTimeout(voiceTimer.current);
-        voiceTimer.current = setTimeout(() => setLastVoiceFrom(null), 3000);
       },
       onChat: ({ fromUserId, fromName, text }) => {
         // Every message (including our own) arrives via the broadcast echo, so
@@ -284,114 +229,20 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     return () => sub.remove();
   }, [syncState]);
 
-  // --- Push-to-talk ---------------------------------------------------------
-
-  // Play a remote clip from its URL, releasing the player once it ends.
-  const playRemoteVoice = useCallback((url: string) => {
-    try {
-      const player = createAudioPlayer({ uri: url });
-      const sub = player.addListener('playbackStatusUpdate', (s) => {
-        if (s.didJustFinish) {
-          sub.remove();
-          try {
-            player.remove();
-          } catch {
-            /* ignore */
-          }
-        }
-      });
-      voicePlayers.current.push(sub);
-      player.play();
-    } catch {
-      // ignore — a single clip failing to play shouldn't disrupt the game.
-    }
-  }, []);
-
-  const stopRecording = useCallback(async () => {
-    // Signal "stop" regardless of whether start has finished its async setup.
-    wantRecordingRef.current = false;
-    if (autoStopTimer.current) {
-      clearTimeout(autoStopTimer.current);
-      autoStopTimer.current = null;
-    }
-    // Released before recording actually began: make sure a recorder that raced
-    // past us is still stopped, then bail without uploading an empty clip.
-    if (!recordingRef.current) {
-      try {
-        if (recorder.isRecording) await recorder.stop();
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-    recordingRef.current = false;
-    setRecording(false);
-    let uri: string | null = null;
-    try {
-      await recorder.stop();
-      uri = recorder.uri ?? null;
-    } catch {
-      return;
-    }
-    if (!uri) return;
-    setSendingVoice(true);
-    try {
-      await sendVoice(matchId, uri);
-    } catch {
-      showFeedback('Could not send voice — check your connection.');
-    } finally {
-      setSendingVoice(false);
-    }
-  }, [recorder, matchId, showFeedback]);
-
-  const startRecording = useCallback(async () => {
-    if (recordingRef.current || sendingVoice) return;
-    wantRecordingRef.current = true;
-    try {
-      if (!micGrantedRef.current) {
-        const perm = await AudioModule.requestRecordingPermissionsAsync();
-        micGrantedRef.current = perm.granted;
-        if (!perm.granted) {
-          wantRecordingRef.current = false;
-          showFeedback('Microphone permission is needed to talk.');
-          return;
-        }
-        await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      }
-      await recorder.prepareToRecordAsync();
-      // The user may have released during prepare — honour that.
-      if (!wantRecordingRef.current) return;
-      recorder.record();
-      recordingRef.current = true;
-      setRecording(true);
-      hapticLight();
-      // Safety auto-stop so a stuck press can't record indefinitely.
-      autoStopTimer.current = setTimeout(() => {
-        void stopRecording();
-      }, MAX_RECORD_MS);
-    } catch {
-      wantRecordingRef.current = false;
-      recordingRef.current = false;
-      setRecording(false);
-      showFeedback('Could not start recording.');
-    }
-  }, [sendingVoice, recorder, showFeedback, stopRecording]);
-
-  // Tear down any pending timers / players on unmount.
+  // If it's someone else's turn and they stall (or have left), ask the server to
+  // skip them after the timeout. Resets whenever the turn changes. The server
+  // validates the elapsed time, so concurrent requests are harmless no-ops.
+  const currentIndex = state?.currentPlayerIndex;
   useEffect(() => {
-    return () => {
-      if (voiceTimer.current) clearTimeout(voiceTimer.current);
-      if (autoStopTimer.current) clearTimeout(autoStopTimer.current);
-      voicePlayers.current.forEach((s) => {
-        try {
-          s.remove();
-        } catch {
-          /* ignore */
-        }
-      });
-      voicePlayers.current = [];
-    };
-  }, []);
+    if (!state || state.phase === 'finished') return;
+    const current = state.players[state.currentPlayerIndex];
+    if (!current || current.id === selfId) return; // never time out my own turn
+    const t = setTimeout(() => {
+      pingTimeout(matchId).catch(() => {});
+    }, TURN_TIMEOUT_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, state?.phase, selfId, matchId]);
 
   // Send a move; surface 422 errors as feedback.
   const dispatch = useCallback(
@@ -446,11 +297,20 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     void dispatch({ type: 'announceKadi' });
   }, [dispatch]);
 
+  // Plain close (no forfeit) — used from the connecting/waiting screen.
   const exit = useCallback(() => {
     clientRef.current?.close();
     clientRef.current = null;
     onExit();
   }, [onExit]);
+
+  // Intentional leave = forfeit. Tell the server (best-effort) then close.
+  const leave = useCallback(() => {
+    void leaveMatch(matchId).catch(() => {});
+    clientRef.current?.close();
+    clientRef.current = null;
+    onExit();
+  }, [matchId, onExit]);
 
   // --- Text chat ------------------------------------------------------------
   const sendChatMessage = useCallback(
@@ -478,12 +338,7 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     skipTurn,
     announceKadi,
     exit,
-    // Push-to-talk
-    lastVoiceFrom,
-    recording,
-    sendingVoice,
-    startRecording,
-    stopRecording,
+    leave,
     // Text chat
     messages,
     unreadChat,

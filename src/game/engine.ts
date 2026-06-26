@@ -2,7 +2,6 @@ import { cardsPerPlayer, createDeck, shuffle } from './deck';
 import {
   canStartSequence,
   cardsConnect,
-  findWinningPlay,
   hasAnyPlay,
   isPlayable,
   isSpecial,
@@ -89,16 +88,13 @@ export function createGame(
     skipCount: 0,
     announcedKadi,
     awaitingAnnounce: false,
+    declaredThisTurn: false,
     phase: 'playing',
     winnerId: null,
     settings,
     log: [`Game started. Top card: ${cardLabel(start)}.`],
   };
 
-  // A rare opening hand can already hold a winning play; reflect that so the
-  // first player is correctly asked to declare instead of proposing a move that
-  // would be rejected (which would deadlock an AI).
-  state.awaitingAnnounce = mustDeclareKadi(state);
   return state;
 }
 
@@ -133,8 +129,9 @@ function drawCards(state: GameState, player: Player, n: number): void {
     if (state.drawPile.length === 0) break; // truly nothing left
     player.hand.push(state.drawPile.pop()!);
   }
-  // Drawing changes hand size, so any prior Kadi announcement is void.
-  state.announcedKadi[player.id] = false;
+  // Drawing means you couldn't go out — you lose a "Kadi" you declared on an
+  // EARLIER turn. A draw on your declaration turn keeps it (you'll try next turn).
+  if (!state.declaredThisTurn) state.announcedKadi[player.id] = false;
 }
 
 function log(state: GameState, msg: string): void {
@@ -143,37 +140,10 @@ function log(state: GameState, msg: string): void {
 
 // ---- the reducer ----
 
-// The current player must declare "Niko Kadi" when they hold a winning play (a
-// single card or full-hand chain that finishes on a non-special card) but have
-// not declared yet. Declaring is its own turn — it warns opponents, who then get
-// a chance to block before the finish. Only meaningful on a clean turn (no
-// pending penalty/skip/question, where you couldn't cleanly go out anyway).
-function mustDeclareKadi(state: GameState): boolean {
-  if (state.phase !== 'playing') return false;
-  if (!canStartSequence(state)) return false;
-  const cur = state.players[state.currentPlayerIndex];
-  if (state.announcedKadi[cur.id]) return false;
-  return findWinningPlay(state, cur.hand) !== null;
-}
-
 export function applyMove(prev: GameState, move: Move): GameState {
-  const next = reduce(prev, move);
-  // A rejected move returns prev unchanged; its awaitingAnnounce already holds.
-  if (next === prev) return prev;
-  // Recompute whose-turn-must-declare for the player now on turn.
-  next.awaitingAnnounce = mustDeclareKadi(next);
-  return next;
-}
-
-function reduce(prev: GameState, move: Move): GameState {
   if (prev.phase === 'finished') return prev;
   const state = clone(prev);
   const player = state.players[state.currentPlayerIndex];
-
-  // While a player owes a "Kadi" declaration, that's the only legal move.
-  if (state.awaitingAnnounce && move.type !== 'announceKadi') {
-    return prev;
-  }
 
   if (move.type === 'skipTurn') {
     if (state.skipCount <= 0) return prev; // nothing to skip
@@ -183,14 +153,13 @@ function reduce(prev: GameState, move: Move): GameState {
   }
 
   if (move.type === 'announceKadi') {
-    // Declaring is only valid when you actually hold a winning play (the engine
-    // sets awaitingAnnounce for exactly that). It is its OWN turn: it warns the
-    // table and passes play on, so opponents get one chance to block before you
-    // finish on your next turn.
-    if (!state.awaitingAnnounce) return prev;
+    // Declaring is ALWAYS available on your turn until you've declared. It does
+    // NOT end your turn — you say it and keep playing — but `declaredThisTurn`
+    // blocks a win on this same turn, so you can only finish on a later turn.
+    if (state.announcedKadi[player.id]) return prev; // already declared
     state.announcedKadi[player.id] = true;
-    log(state, `${player.name} declares "Niko Kadi!" — one card from winning.`);
-    advanceTurn(state, 1);
+    state.declaredThisTurn = true;
+    log(state, `${player.name} declares "Niko Kadi!"`);
     return state;
   }
 
@@ -264,18 +233,25 @@ function reduce(prev: GameState, move: Move): GameState {
     return state;
   }
 
+  // A non-winning play on a later turn means you didn't go out — you forfeit a
+  // "Kadi" declared on an earlier turn. (On your declaration turn it's kept.)
+  if (!state.declaredThisTurn && state.announcedKadi[player.id]) {
+    state.announcedKadi[player.id] = false;
+    log(state, `${player.name} didn't go out — "Kadi" is lost.`);
+  }
   const step = applyOneCardEffect(state, player, card, true, move.chosenSuit);
   finishTurn(state, player, step);
   return state;
 }
 
 // A play that empties the hand WINS only if all hold: the last card is
-// non-special, the player had declared "Kadi", and no OTHER player is currently
-// cardless. While any player is cardless, nobody can win.
+// non-special, the player declared "Kadi" on an EARLIER turn (not this one), and
+// no OTHER player is currently cardless. While any player is cardless, nobody wins.
 function isValidWin(state: GameState, player: Player, last: Card): boolean {
   return (
     !isSpecial(last.rank) &&
     state.announcedKadi[player.id] &&
+    !state.declaredThisTurn &&
     noOtherCardless(state, player)
   );
 }
@@ -344,6 +320,11 @@ function applySequence(
     return state;
   }
 
+  // A non-winning throw on a later turn forfeits a "Kadi" declared earlier.
+  if (!state.declaredThisTurn && state.announcedKadi[player.id]) {
+    state.announcedKadi[player.id] = false;
+    log(state, `${player.name} didn't go out — "Kadi" is lost.`);
+  }
   // Every card's power fires, in order; only the last card may leave an open
   // question or set the chosen suit.
   let step = 1;
@@ -355,16 +336,11 @@ function applySequence(
   return state;
 }
 
-// A player accepts (is consumed by) one pending skip. Being skipped also voids
-// any "Kadi" they had declared — they must declare again before going out.
+// A player accepts (is consumed by) one pending skip. Being skipped does NOT
+// void a declared "Kadi" — the player keeps their status across the skip.
 function skipPlayer(state: GameState, player: Player): void {
   state.skipCount -= 1;
-  if (state.announcedKadi[player.id]) {
-    state.announcedKadi[player.id] = false;
-    log(state, `${player.name} is skipped — their "Kadi" is lost!`);
-  } else {
-    log(state, `${player.name} is skipped.`);
-  }
+  log(state, `${player.name} is skipped.`);
 }
 
 // Advance the turn. (Declaring "Kadi" is a separate, always-available action,
@@ -446,6 +422,9 @@ function advanceTurn(state: GameState, step: number): void {
     state.currentPlayerIndex,
     step
   );
+  // The declaration window only covers the turn it was made on; once the turn
+  // moves on, a declared player may win on their following turn.
+  state.declaredThisTurn = false;
 }
 
 // Convenience used by the UI / AI: is there any legal play for the current

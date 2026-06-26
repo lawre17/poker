@@ -1,4 +1,4 @@
-import { canStartSequence, findWinningPlay, playableCards } from './rules';
+import { canStartSequence, findWinningPlay, isSpecial, playableCards } from './rules';
 import { Card, GameState, Move, Suit, SUITS } from './types';
 
 // Preference order for offloading special cards (Aces kept for last — they're
@@ -44,11 +44,6 @@ function mostCommonSuit(hand: Card[], exclude?: Card): Suit {
 export function decideMove(state: GameState): Move {
   const player = state.players[state.currentPlayerIndex];
 
-  // Turn is held for a "Kadi" declaration — declare it.
-  if (state.awaitingAnnounce) {
-    return { type: 'announceKadi' };
-  }
-
   // Under a Jack skip: bounce it with a Jack if possible (but never as the last
   // card), otherwise accept the skip.
   if (state.skipCount > 0) {
@@ -58,31 +53,43 @@ export function decideMove(state: GameState): Move {
     return jack ? { type: 'play', cardId: jack.id } : { type: 'skipTurn' };
   }
 
-  // A winning play is in hand (clean turn): declare first, then execute it.
-  if (canStartSequence(state)) {
-    const win = findWinningPlay(state, player.hand);
-    if (win) {
-      if (!state.announcedKadi[player.id]) return { type: 'announceKadi' };
-      if (win.length === 1) return buildPlay(state, player.hand, win[0]);
-      const last = win[win.length - 1];
-      return {
-        type: 'playSequence',
-        cardIds: win.map((c) => c.id),
-        chosenSuit:
-          last.rank === 'A' ? mostCommonSuit(player.hand, last) : undefined,
-      };
-    }
-  }
+  const win = canStartSequence(state)
+    ? findWinningPlay(state, player.hand)
+    : null;
+  const declared = state.announcedKadi[player.id];
 
-  // Never voluntarily go cardless: if down to a single card and no valid
-  // winning play fired above, drawing is the only non-losing move. (This also
-  // covers the lone-Ace penalty case — draw/pick the penalty instead of
-  // offloading the Ace into a cardless state.)
-  if (player.hand.length === 1) {
-    return { type: 'draw' };
+  // Finish now — but ONLY if we declared on an EARLIER turn (can't win the same
+  // turn we declare).
+  if (win && declared && !state.declaredThisTurn) {
+    if (win.length === 1) return buildPlay(state, player.hand, win[0]);
+    const last = win[win.length - 1];
+    return {
+      type: 'playSequence',
+      cardIds: win.map((c) => c.id),
+      chosenSuit:
+        last.rank === 'A' ? mostCommonSuit(player.hand, last) : undefined,
+    };
   }
 
   const playable = playableCards(state, player.hand);
+
+  // Declare proactively — a turn BEFORE going out — so we can finish next turn.
+  // Declaring doesn't end the turn, so we still make a holding move below.
+  if (!declared && (win !== null || player.hand.length <= 2) && playable.length > 0) {
+    return { type: 'announceKadi' };
+  }
+
+  // Holding move on our declaration turn: if we hold a winning chain, peel its
+  // first card so the remainder stays a valid finish for next turn.
+  if (state.declaredThisTurn && win && win.length >= 2) {
+    return buildPlay(state, player.hand, win[0]);
+  }
+
+  // Never voluntarily go cardless: down to a single card with no earlier-declared
+  // win, drawing is the only non-losing move.
+  if (player.hand.length === 1) {
+    return { type: 'draw' };
+  }
 
   if (playable.length === 0) {
     return { type: 'draw' };
@@ -95,6 +102,19 @@ export function decideMove(state: GameState): Move {
     const ace = playable.find((c) => c.rank === 'A');
     const chosen = counter ?? ace!;
     return buildPlay(state, player.hand, chosen);
+  }
+
+  // When we've declared and are down to two cards, keep a non-special card as
+  // the finisher: play the OTHER card now (often a special one) so next turn we
+  // can go out on the plain card.
+  if (declared && player.hand.length === 2) {
+    const finisher = playable.find((c) => !isSpecial(c.rank));
+    if (finisher) {
+      const other = player.hand.find((c) => c.id !== finisher.id);
+      if (other && playable.some((c) => c.id === other.id)) {
+        return buildPlay(state, player.hand, other);
+      }
+    }
   }
 
   // Otherwise offload by preference order.

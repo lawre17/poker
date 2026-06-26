@@ -96,11 +96,13 @@ export interface GameState {
   // may bounce one by playing their own Jack, or accept it (lose their turn,
   // decrementing the count) — repeating until the count reaches zero.
   skipCount: number;
-  // Player ids that have announced "Kadi" (allowed to win on their next play).
+  // Player ids that have announced "Kadi" (allowed to win on a later play).
   announcedKadi: Record<string, boolean>;
-  // True when the current player just dropped to their last card and must
-  // declare "Kadi" before the turn passes. Their turn is held until they do.
+  // Deprecated/unused: the engine no longer forces a held declaration turn.
   awaitingAnnounce: boolean;
+  // True only on the turn the current player declared "Kadi" — blocks winning on
+  // that same turn (you can declare and play, but finish on a later turn).
+  declaredThisTurn: boolean;
   phase: Phase;
   winnerId: string | null;
   settings: GameSettings;
