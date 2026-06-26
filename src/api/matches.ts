@@ -83,6 +83,15 @@ export function getMatchState(matchId: string): Promise<MatchStateResponse> {
   return apiFetch<MatchStateResponse>(`/matches/${matchId}/state`);
 }
 
+// Send a short text chat message to the room. Ephemeral — the server only
+// broadcasts it over Reverb (nothing is stored).
+export function sendChat(matchId: string, text: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/matches/${matchId}/chat`, {
+    method: 'POST',
+    body: { text },
+  });
+}
+
 // Upload a short push-to-talk voice clip (recorded as m4a/AAC). The server
 // stores it and broadcasts the URL to the room over Reverb.
 export function sendVoice(

@@ -2,6 +2,7 @@ import { cardsPerPlayer, createDeck, shuffle } from './deck';
 import {
   canStartSequence,
   cardsConnect,
+  findWinningPlay,
   hasAnyPlay,
   isPlayable,
   isSpecial,
@@ -76,7 +77,7 @@ export function createGame(
   const announcedKadi: Record<string, boolean> = {};
   for (const p of players) announcedKadi[p.id] = false;
 
-  return {
+  const state: GameState = {
     players,
     drawPile,
     discardPile: [start],
@@ -93,6 +94,12 @@ export function createGame(
     settings,
     log: [`Game started. Top card: ${cardLabel(start)}.`],
   };
+
+  // A rare opening hand can already hold a winning play; reflect that so the
+  // first player is correctly asked to declare instead of proposing a move that
+  // would be rejected (which would deadlock an AI).
+  state.awaitingAnnounce = mustDeclareKadi(state);
+  return state;
 }
 
 // ---- internal helpers (mutate the passed-in state copy) ----
@@ -136,7 +143,29 @@ function log(state: GameState, msg: string): void {
 
 // ---- the reducer ----
 
+// The current player must declare "Niko Kadi" when they hold a winning play (a
+// single card or full-hand chain that finishes on a non-special card) but have
+// not declared yet. Declaring is its own turn — it warns opponents, who then get
+// a chance to block before the finish. Only meaningful on a clean turn (no
+// pending penalty/skip/question, where you couldn't cleanly go out anyway).
+function mustDeclareKadi(state: GameState): boolean {
+  if (state.phase !== 'playing') return false;
+  if (!canStartSequence(state)) return false;
+  const cur = state.players[state.currentPlayerIndex];
+  if (state.announcedKadi[cur.id]) return false;
+  return findWinningPlay(state, cur.hand) !== null;
+}
+
 export function applyMove(prev: GameState, move: Move): GameState {
+  const next = reduce(prev, move);
+  // A rejected move returns prev unchanged; its awaitingAnnounce already holds.
+  if (next === prev) return prev;
+  // Recompute whose-turn-must-declare for the player now on turn.
+  next.awaitingAnnounce = mustDeclareKadi(next);
+  return next;
+}
+
+function reduce(prev: GameState, move: Move): GameState {
   if (prev.phase === 'finished') return prev;
   const state = clone(prev);
   const player = state.players[state.currentPlayerIndex];
@@ -154,12 +183,14 @@ export function applyMove(prev: GameState, move: Move): GameState {
   }
 
   if (move.type === 'announceKadi') {
-    // Declaring is NOT a play — it just sets your "Kadi" status and does not
-    // end your turn. You still play your card(s) the same turn.
-    if (state.announcedKadi[player.id]) return prev; // already declared
+    // Declaring is only valid when you actually hold a winning play (the engine
+    // sets awaitingAnnounce for exactly that). It is its OWN turn: it warns the
+    // table and passes play on, so opponents get one chance to block before you
+    // finish on your next turn.
+    if (!state.awaitingAnnounce) return prev;
     state.announcedKadi[player.id] = true;
-    state.awaitingAnnounce = false;
-    log(state, `${player.name} declares "Niko Kadi!"`);
+    log(state, `${player.name} declares "Niko Kadi!" — one card from winning.`);
+    advanceTurn(state, 1);
     return state;
   }
 

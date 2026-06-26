@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Roster } from '../api/matches';
+import { ChatPanel } from './ChatPanel';
 import { GameScreen } from './GameScreen';
 import { VoiceButton } from './VoiceButton';
 import { useOnlineGame } from './useOnlineGame';
@@ -30,6 +31,10 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
     sendingVoice,
     startRecording,
     stopRecording,
+    messages,
+    unreadChat,
+    sendChatMessage,
+    markChatRead,
   } = useOnlineGame({ matchId, roster, onExit });
 
   // Until the first gameState arrives, show a connecting placeholder.
@@ -70,6 +75,12 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
         speakingName={lastVoiceFrom}
         onStart={startRecording}
         onStop={stopRecording}
+      />
+      <ChatPanel
+        messages={messages}
+        unread={unreadChat}
+        onSend={sendChatMessage}
+        onOpened={markChatRead}
       />
     </View>
   );

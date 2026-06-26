@@ -127,8 +127,10 @@ export function GameScreen({
     else doCommit();
   };
 
-  // Declaring is always available on your turn until you've declared.
-  const canAnnounce = isHumanTurn && !state.announcedKadi[human.id];
+  // Declaring is offered only when you actually hold a winning play (the engine
+  // sets awaitingAnnounce). Declaring passes your turn — opponents get one chance
+  // to block before you can finish on your next turn.
+  const canAnnounce = isHumanTurn && state.awaitingAnnounce;
 
   const [muted, setMutedState] = useState(getMuted());
   const toggleMute = () => {
@@ -246,7 +248,7 @@ export function GameScreen({
       <View style={styles.table}>
         <View style={styles.pileRow}>
           <Pressable
-            onPress={() => isHumanTurn && onDraw()}
+            onPress={() => isHumanTurn && !state.awaitingAnnounce && onDraw()}
             style={styles.pileSlot}
           >
             <CardView faceDown size="lg" />

@@ -7,9 +7,16 @@ import {
 } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { ApiError } from '../api/client';
 import { useAuth } from '../api/auth';
-import { getMatchState, Roster, sendMove, sendVoice } from '../api/matches';
+import {
+  getMatchState,
+  Roster,
+  sendChat,
+  sendMove,
+  sendVoice,
+} from '../api/matches';
 import { ReverbClient } from '../realtime/reverb';
 import { GameState, Move, Suit } from '../game/types';
 import { initSounds, playSound } from './sound';
@@ -22,6 +29,16 @@ export type ConnStatus =
   | 'connected'
   | 'subscribed'
   | 'closed';
+
+export interface ChatMsg {
+  id: string;
+  fromName: string;
+  text: string;
+  self: boolean;
+}
+
+// Keep only the most recent messages in memory — chat is ephemeral.
+const MAX_CHAT = 50;
 
 interface UseOnlineGameArgs {
   matchId: string;
@@ -54,6 +71,12 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
   const [recording, setRecording] = useState(false);
   const [sendingVoice, setSendingVoice] = useState(false);
 
+  // Text chat (ephemeral). messages holds a rolling window; unreadChat counts
+  // messages received while the chat panel is closed.
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const chatSeq = useRef(0);
+
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   const clientRef = useRef<ReverbClient | null>(null);
@@ -63,6 +86,13 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
   const autoStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Remote-clip players are kept alive until playback finishes, then released.
   const voicePlayers = useRef<{ remove: () => void }[]>([]);
+  // Push-to-talk coordination. The button's press-in fires an async start
+  // (prepare->record); a quick release can land before recording actually
+  // begins, so we track intent (want) and the real recorder state (active) via
+  // refs to avoid stale closures and orphaned recordings.
+  const wantRecordingRef = useRef(false);
+  const recordingRef = useRef(false);
+  const micGrantedRef = useRef(false);
 
   // Map the signed-in user to their engine id (e.g. 'p1') for GameScreen.
   const selfEntry = currentRoster.find(
@@ -78,6 +108,28 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
 
   useEffect(() => {
     initSounds();
+  }, []);
+
+  // Pre-warm microphone permission and the recording audio mode once on mount so
+  // the first hold-to-talk press records instantly instead of being eaten by the
+  // permission dialog (the original cause of "recording doesn't work").
+  useEffect(() => {
+    let done = false;
+    (async () => {
+      try {
+        const perm = await AudioModule.requestRecordingPermissionsAsync();
+        if (done) return;
+        micGrantedRef.current = perm.granted;
+        if (perm.granted) {
+          await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+        }
+      } catch {
+        /* ignore — handled again lazily on first press */
+      }
+    })();
+    return () => {
+      done = true;
+    };
   }, []);
 
   // Sound effects for state transitions, mirroring useGame.
@@ -129,6 +181,18 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
         if (voiceTimer.current) clearTimeout(voiceTimer.current);
         voiceTimer.current = setTimeout(() => setLastVoiceFrom(null), 3000);
       },
+      onChat: ({ fromUserId, fromName, text }) => {
+        // Every message (including our own) arrives via the broadcast echo, so
+        // chat has a single source of truth.
+        const self = user != null && String(fromUserId) === String(user.id);
+        chatSeq.current += 1;
+        const id = `c${chatSeq.current}`;
+        setMessages((cur) => {
+          const next = [...cur, { id, fromName, text, self }];
+          return next.length > MAX_CHAT ? next.slice(next.length - MAX_CHAT) : next;
+        });
+        if (!self) setUnreadChat((n) => n + 1);
+      },
       onStatus: (s) => setStatus(s),
     });
     clientRef.current = client;
@@ -139,12 +203,13 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     };
   }, [matchId, token, refreshMe, user]);
 
-  // Once subscribed, fetch the current authoritative state so we render
-  // immediately instead of waiting for the next broadcast (the one-time initial
-  // state may have been sent before we subscribed). Re-runs on reconnect.
-  // Guard against regressing a newer state already pushed over the socket.
-  useEffect(() => {
-    if (status !== 'subscribed') return;
+  // Fetch the authoritative state and reconcile it with what we have. The Reverb
+  // broadcast is the fast path, but it is fire-and-forget: if a single gameState
+  // message never reaches us (socket blip, app backgrounded, lobby->game
+  // transition racing the first broadcast) we would otherwise sit on stale state
+  // forever. This pull lets any missed update self-heal. The guard never lets a
+  // pulled state regress a newer one already pushed over the socket.
+  const syncState = useCallback(() => {
     let cancelled = false;
     getMatchState(matchId)
       .then((res) => {
@@ -162,7 +227,33 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     return () => {
       cancelled = true;
     };
-  }, [status, matchId]);
+  }, [matchId]);
+
+  // Once subscribed, pull immediately so we render without waiting for the next
+  // broadcast (the one-time initial state may have been sent before we
+  // subscribed). Re-runs on reconnect.
+  useEffect(() => {
+    if (status !== 'subscribed') return;
+    return syncState();
+  }, [status, syncState]);
+
+  // Periodic re-sync while the game is live, so a dropped broadcast recovers
+  // within a few seconds. Stops once the game finishes. /state is ~1-2ms on the
+  // engine, so a 4s cadence is cheap.
+  useEffect(() => {
+    if (state?.phase === 'finished') return;
+    const id = setInterval(() => syncState(), 4000);
+    return () => clearInterval(id);
+  }, [state?.phase, syncState]);
+
+  // Re-sync the moment the app returns to the foreground: backgrounding is the
+  // most common way the socket silently drops a message.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') syncState();
+    });
+    return () => sub.remove();
+  }, [syncState]);
 
   // --- Push-to-talk ---------------------------------------------------------
 
@@ -188,18 +279,31 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
   }, []);
 
   const stopRecording = useCallback(async () => {
+    // Signal "stop" regardless of whether start has finished its async setup.
+    wantRecordingRef.current = false;
     if (autoStopTimer.current) {
       clearTimeout(autoStopTimer.current);
       autoStopTimer.current = null;
     }
-    if (!recording) return;
+    // Released before recording actually began: make sure a recorder that raced
+    // past us is still stopped, then bail without uploading an empty clip.
+    if (!recordingRef.current) {
+      try {
+        if (recorder.isRecording) await recorder.stop();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    recordingRef.current = false;
     setRecording(false);
+    let uri: string | null = null;
     try {
       await recorder.stop();
+      uri = recorder.uri ?? null;
     } catch {
       return;
     }
-    const uri = recorder.uri;
     if (!uri) return;
     setSendingVoice(true);
     try {
@@ -209,19 +313,27 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     } finally {
       setSendingVoice(false);
     }
-  }, [recording, recorder, matchId, showFeedback]);
+  }, [recorder, matchId, showFeedback]);
 
   const startRecording = useCallback(async () => {
-    if (recording || sendingVoice) return;
+    if (recordingRef.current || sendingVoice) return;
+    wantRecordingRef.current = true;
     try {
-      const perm = await AudioModule.requestRecordingPermissionsAsync();
-      if (!perm.granted) {
-        showFeedback('Microphone permission is needed to talk.');
-        return;
+      if (!micGrantedRef.current) {
+        const perm = await AudioModule.requestRecordingPermissionsAsync();
+        micGrantedRef.current = perm.granted;
+        if (!perm.granted) {
+          wantRecordingRef.current = false;
+          showFeedback('Microphone permission is needed to talk.');
+          return;
+        }
+        await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       }
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
+      // The user may have released during prepare — honour that.
+      if (!wantRecordingRef.current) return;
       recorder.record();
+      recordingRef.current = true;
       setRecording(true);
       hapticLight();
       // Safety auto-stop so a stuck press can't record indefinitely.
@@ -229,10 +341,12 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
         void stopRecording();
       }, MAX_RECORD_MS);
     } catch {
+      wantRecordingRef.current = false;
+      recordingRef.current = false;
       setRecording(false);
       showFeedback('Could not start recording.');
     }
-  }, [recording, sendingVoice, recorder, showFeedback, stopRecording]);
+  }, [sendingVoice, recorder, showFeedback, stopRecording]);
 
   // Tear down any pending timers / players on unmount.
   useEffect(() => {
@@ -306,6 +420,20 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     onExit();
   }, [onExit]);
 
+  // --- Text chat ------------------------------------------------------------
+  const sendChatMessage = useCallback(
+    (text: string) => {
+      const t = text.trim().slice(0, 200);
+      if (!t) return;
+      void sendChat(matchId, t).catch(() => {
+        showFeedback('Could not send message.');
+      });
+    },
+    [matchId, showFeedback]
+  );
+
+  const markChatRead = useCallback(() => setUnreadChat(0), []);
+
   return {
     state,
     feedback,
@@ -324,5 +452,10 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     sendingVoice,
     startRecording,
     stopRecording,
+    // Text chat
+    messages,
+    unreadChat,
+    sendChatMessage,
+    markChatRead,
   };
 }

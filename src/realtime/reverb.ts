@@ -28,12 +28,18 @@ export interface VoicePayload {
   fromName: string;
   url: string;
 }
+export interface ChatPayload {
+  fromUserId: string | number;
+  fromName: string;
+  text: string;
+}
 
 export interface ReverbCallbacks {
   onGameState?: (payload: GameStatePayload) => void;
   onRoomState?: (payload: RoomStatePayload) => void;
   onAwarded?: (payload: AwardedPayload) => void;
   onVoice?: (payload: VoicePayload) => void;
+  onChat?: (payload: ChatPayload) => void;
   onStatus?: (status: 'connecting' | 'connected' | 'subscribed' | 'closed') => void;
 }
 
@@ -131,6 +137,11 @@ export class ReverbClient {
       case 'voice': {
         const payload = this.parseData<VoicePayload>(msg.data);
         if (payload) this.callbacks.onVoice?.(payload);
+        return;
+      }
+      case 'chat': {
+        const payload = this.parseData<ChatPayload>(msg.data);
+        if (payload) this.callbacks.onChat?.(payload);
         return;
       }
       default:
