@@ -52,9 +52,14 @@ export function isPlayable(state: GameState, card: Card): boolean {
     return false;
   }
 
-  // 2. Open question — must answer with same suit.
+  // 2. Open question — answer with a card of the question's suit, OR with
+  //    another question (8/Q of any suit), OR with a wild Ace.
   if (state.questionSuit) {
-    return card.suit === state.questionSuit;
+    return (
+      card.suit === state.questionSuit ||
+      isQuestion(card.rank) ||
+      card.rank === 'A'
+    );
   }
 
   // 3. Normal play.
@@ -88,12 +93,17 @@ export function matchesTop(state: GameState, card: Card): boolean {
 
 // Two consecutive cards in a chain connect only if:
 //  - they share a rank (e.g. J♣ → J♥, Q♥ → Q♠), or
-//  - the previous card is a question (8/Q) and the next is its answer — a card
-//    of the same suit (e.g. 8♥ → Q♥, Q♠ → 10♠).
+//  - the previous card is a question (8/Q) and the next is a valid answer: a
+//    card of the same suit (8♥ → Q♥, Q♠ → 10♠), another question of any suit
+//    (8♥ → Q♠), or a wild Ace.
 // Matching by suit alone does NOT chain two ordinary cards (K♥ → J♥ is illegal).
 export function cardsConnect(prev: Card, next: Card): boolean {
   if (prev.rank === next.rank) return true;
-  if (isQuestion(prev.rank) && next.suit === prev.suit) return true;
+  if (isQuestion(prev.rank)) {
+    return (
+      next.suit === prev.suit || isQuestion(next.rank) || next.rank === 'A'
+    );
+  }
   return false;
 }
 
