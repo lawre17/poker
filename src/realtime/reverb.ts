@@ -49,8 +49,12 @@ interface PusherMessage {
   data?: unknown;
 }
 
-const MAX_BACKOFF_MS = 15000;
+const MAX_BACKOFF_MS = 8000;
 const BASE_BACKOFF_MS = 1000;
+// Heartbeat: ping this often, and if no message arrives within the dead window,
+// assume the socket died silently (common on mobile) and force a reconnect.
+const HEARTBEAT_MS = 20000;
+const DEAD_AFTER_MS = 32000;
 
 export class ReverbClient {
   private ws: WebSocket | null = null;
@@ -58,6 +62,8 @@ export class ReverbClient {
   private closed = false;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private lastActivity = 0;
   private readonly channel: string;
 
   constructor(
@@ -86,6 +92,7 @@ export class ReverbClient {
 
     ws.onmessage = (e) => this.handleMessage(e);
     ws.onclose = () => {
+      this.stopHeartbeat();
       this.callbacks.onStatus?.('closed');
       if (!this.closed) this.scheduleReconnect();
     };
@@ -94,7 +101,45 @@ export class ReverbClient {
     };
   }
 
+  // Proactively ping so the connection stays active, and detect a socket that
+  // has died without firing onclose (mobile networks do this): if nothing has
+  // arrived within DEAD_AFTER_MS, drop it and reconnect.
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastActivity = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.closed) return;
+      if (Date.now() - this.lastActivity > DEAD_AFTER_MS) {
+        // Presumed dead — tear down and reconnect from scratch.
+        this.stopHeartbeat();
+        if (this.ws) {
+          this.ws.onclose = null;
+          try {
+            this.ws.close();
+          } catch {
+            /* ignore */
+          }
+          this.ws = null;
+        }
+        this.callbacks.onStatus?.('closed');
+        this.scheduleReconnect();
+        return;
+      }
+      this.send({ event: 'pusher:ping' });
+    }, HEARTBEAT_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
   private handleMessage(e: WebSocketMessageEvent): void {
+    // Any inbound frame proves the socket is alive.
+    this.lastActivity = Date.now();
+
     let msg: PusherMessage;
     try {
       msg = JSON.parse(typeof e.data === 'string' ? e.data : '');
@@ -108,11 +153,15 @@ export class ReverbClient {
         this.socketId = data?.socket_id ?? null;
         this.reconnectAttempts = 0;
         this.callbacks.onStatus?.('connected');
+        this.startHeartbeat();
         void this.subscribe();
         return;
       }
       case 'pusher:ping':
         this.send({ event: 'pusher:pong' });
+        return;
+      case 'pusher:pong':
+        // Our heartbeat was answered — nothing to do (activity already noted).
         return;
       case 'pusher_internal:subscription_succeeded':
         if (msg.channel === this.channel) {
@@ -217,6 +266,7 @@ export class ReverbClient {
 
   close(): void {
     this.closed = true;
+    this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

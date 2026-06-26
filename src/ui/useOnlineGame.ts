@@ -238,11 +238,11 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
   }, [status, syncState]);
 
   // Periodic re-sync while the game is live, so a dropped broadcast recovers
-  // within a few seconds. Stops once the game finishes. /state is ~1-2ms on the
-  // engine, so a 4s cadence is cheap.
+  // quickly even if the socket went silently dead (common on mobile). Stops once
+  // the game finishes. /state is ~1-2ms on the engine, so a 2s cadence is cheap.
   useEffect(() => {
     if (state?.phase === 'finished') return;
-    const id = setInterval(() => syncState(), 4000);
+    const id = setInterval(() => syncState(), 2000);
     return () => clearInterval(id);
   }, [state?.phase, syncState]);
 
@@ -370,7 +370,10 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
       if (!state || state.phase === 'finished') return;
       try {
         await sendMove(matchId, move);
-        // The new state arrives via the socket — nothing to do on success.
+        // Pull the authoritative post-move state immediately so the acting
+        // player's screen advances right away instead of waiting for the
+        // Reverb echo (which a quiet/backgrounded socket can miss).
+        syncState();
       } catch (e) {
         if (e instanceof ApiError) {
           showFeedback(e.message || 'Illegal move');
@@ -382,7 +385,7 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
         ).catch(() => {});
       }
     },
-    [matchId, state, showFeedback]
+    [matchId, state, showFeedback, syncState]
   );
 
   const playCard = useCallback(

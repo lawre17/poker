@@ -382,9 +382,19 @@ export function GameScreen({
 
         {/* Interaction footer */}
         {isHumanTurn && state.awaitingAnnounce && (
-          <Text style={styles.hint}>
-            Winning play in hand — declare Niko Kadi! to pass the turn.
-          </Text>
+          <View style={styles.declareBar}>
+            <Text style={styles.declareHint}>
+              You can win! Declare Niko Kadi to warn the table — you finish on
+              your next turn.
+            </Text>
+            <Animated.View
+              style={{ transform: [{ scale: pulse }], alignSelf: 'stretch' }}
+            >
+              <Pressable style={styles.declareBtn} onPress={onAnnounceKadi}>
+                <Text style={styles.declareBtnText}>🔔 Niko Kadi!</Text>
+              </Pressable>
+            </Animated.View>
+          </View>
         )}
 
         {isHumanTurn && !state.awaitingAnnounce && state.skipCount > 0 && (
@@ -554,6 +564,32 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   kadiBtnText: { color: colors.black, fontWeight: '900' },
+  declareBar: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    gap: 8,
+    alignItems: 'center',
+  },
+  declareHint: {
+    color: colors.text,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  declareBtn: {
+    backgroundColor: colors.gold,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.card,
+  },
+  declareBtnText: {
+    color: colors.black,
+    fontWeight: '900',
+    fontSize: 18,
+    letterSpacing: 0.5,
+  },
   hand: {
     flexDirection: 'row',
     justifyContent: 'center',
