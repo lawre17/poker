@@ -18,6 +18,7 @@ import {
 } from '../game/rules';
 import { Card, GameState, Suit } from '../game/types';
 import { CardView } from './CardView';
+import { ChatBubble } from './ChatBubble';
 import { getMuted, setMuted } from './sound';
 import { SuitPicker } from './SuitPicker';
 import { colors, suitColor, suitSymbol } from './theme';
@@ -52,6 +53,8 @@ interface Props {
   // the offline human ('you') so the single-player flow is unchanged; online
   // play passes the local player's engine id (e.g. 'p1').
   selfId?: string;
+  // Floating chat bubbles keyed by engine seat id (online play only).
+  floats?: Record<string, { id: string; text: string }>;
 }
 
 type AcePicker = null | { mode: 'single'; cardId: string } | { mode: 'commit' };
@@ -66,6 +69,7 @@ export function GameScreen({
   onAnnounceKadi,
   onExit,
   selfId = HUMAN_ID,
+  floats,
 }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [acePicker, setAcePicker] = useState<AcePicker>(null);
@@ -381,6 +385,11 @@ export function GameScreen({
               key={p.id}
               style={[styles.opponent, active && styles.opponentActive]}
             >
+              {floats?.[p.id] && (
+                <View style={styles.oppBubble} pointerEvents="none">
+                  <ChatBubble key={floats[p.id].id} text={floats[p.id].text} />
+                </View>
+              )}
               <Text style={styles.oppName} numberOfLines={1}>
                 {p.name}
                 {state.announcedKadi[p.id] ? ' · Kadi!' : ''}
@@ -482,6 +491,11 @@ export function GameScreen({
 
       {/* Human hand */}
       <View style={styles.handArea}>
+        {floats?.[human.id] && (
+          <View style={styles.selfBubble} pointerEvents="none">
+            <ChatBubble key={floats[human.id].id} text={floats[human.id].text} />
+          </View>
+        )}
         <View style={styles.handHeader}>
           <Text style={styles.handTitle}>
             {human.name} · {human.hand.length} cards
@@ -669,6 +683,22 @@ const styles = StyleSheet.create({
   oppName: { color: colors.text, fontWeight: '700', maxWidth: 100 },
   oppCards: { flexDirection: 'row', marginVertical: 4, height: 66 },
   oppCount: { color: colors.textMuted, fontSize: 12 },
+  oppBubble: {
+    position: 'absolute',
+    top: -40,
+    left: -20,
+    right: -20,
+    alignItems: 'center',
+    zIndex: 50,
+  },
+  selfBubble: {
+    position: 'absolute',
+    top: -36,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 50,
+  },
   table: {
     flex: 1,
     justifyContent: 'center',

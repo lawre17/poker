@@ -35,6 +35,7 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
     unreadChat,
     sendChatMessage,
     markChatRead,
+    floats,
   } = useOnlineGame({ matchId, roster, onExit });
 
   // Until the first gameState arrives, show a connecting placeholder.
@@ -68,6 +69,7 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
         onSkipTurn={skipTurn}
         onAnnounceKadi={announceKadi}
         onExit={exit}
+        floats={floats}
       />
       <VoiceButton
         recording={recording}

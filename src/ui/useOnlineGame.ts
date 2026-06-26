@@ -76,6 +76,11 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [unreadChat, setUnreadChat] = useState(0);
   const chatSeq = useRef(0);
+  // Floating Ludo-style bubbles, keyed by the sender's engine seat id.
+  const [floats, setFloats] = useState<Record<string, { id: string; text: string }>>(
+    {}
+  );
+  const floatSeq = useRef(0);
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
@@ -99,6 +104,11 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     (r) => user != null && String(r.userId) === String(user.id)
   );
   const selfId = selfEntry?.engineId ?? 'p0';
+
+  // Latest roster in a ref so the chat handler (captured in the socket effect)
+  // can map a sender's user id to their engine seat without going stale.
+  const rosterRef = useRef(currentRoster);
+  rosterRef.current = currentRoster;
 
   const showFeedback = useCallback((msg: string) => {
     setFeedback(msg);
@@ -192,6 +202,25 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
           return next.length > MAX_CHAT ? next.slice(next.length - MAX_CHAT) : next;
         });
         if (!self) setUnreadChat((n) => n + 1);
+
+        // Pop a floating bubble over the sender's seat (cleared after ~3.5s).
+        const entry = rosterRef.current.find(
+          (r) => String(r.userId) === String(fromUserId)
+        );
+        const engineId = entry?.engineId;
+        if (engineId) {
+          floatSeq.current += 1;
+          const fid = `f${floatSeq.current}`;
+          setFloats((prev) => ({ ...prev, [engineId]: { id: fid, text } }));
+          setTimeout(() => {
+            setFloats((prev) => {
+              if (prev[engineId]?.id !== fid) return prev;
+              const next = { ...prev };
+              delete next[engineId];
+              return next;
+            });
+          }, 3500);
+        }
       },
       onStatus: (s) => setStatus(s),
     });
@@ -460,5 +489,6 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     unreadChat,
     sendChatMessage,
     markChatRead,
+    floats,
   };
 }
