@@ -1,12 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   canStartSequence,
@@ -24,6 +26,18 @@ import { HUMAN_ID } from './useGame';
 // Width of a large card (must match CardView's `lg` size).
 const HAND_CARD_W = 92;
 const HAND_GAP = 8; // ideal gap between cards when they all fit
+
+// Ordering used by the "Sort" button: group by suit, then by rank.
+const SUIT_SORT: Record<string, number> = {
+  spades: 0,
+  hearts: 1,
+  clubs: 2,
+  diamonds: 3,
+};
+const RANK_SORT: Record<string, number> = {
+  A: 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
+  '8': 8, '9': 9, '10': 10, J: 11, Q: 12, K: 13,
+};
 
 interface Props {
   state: GameState;
@@ -55,6 +69,17 @@ export function GameScreen({
 }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [acePicker, setAcePicker] = useState<AcePicker>(null);
+  // Player's preferred hand order (card ids). Purely cosmetic — the engine
+  // never cares about order. Reconciled with the actual hand below.
+  const [order, setOrder] = useState<string[]>([]);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const pan = useRef(new Animated.ValueXY()).current;
+  const dragRef = useRef<{
+    id: string;
+    startIndex: number;
+    started: boolean;
+    timer: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
 
   const human =
     state.players.find((p) => p.id === selfId) ?? state.players[0];
@@ -198,6 +223,135 @@ export function GameScreen({
     }
   }, [state.phase, winPop]);
 
+  // --- Hand ordering (drag-to-reorder + Sort) -------------------------------
+  // Keep `order` in sync with the actual hand: preserve the player's custom
+  // order for cards they still hold, append freshly drawn cards at the end, and
+  // drop played cards. Runs only when the hand's composition changes (by id), so
+  // a drag/sort that just permutes the same ids is never undone.
+  const handKey = human.hand.map((c) => c.id).join(',');
+  useEffect(() => {
+    const ids = human.hand.map((c) => c.id);
+    const idSet = new Set(ids);
+    setOrder((prev) => {
+      const kept = prev.filter((id) => idSet.has(id));
+      const keptSet = new Set(kept);
+      const next = [...kept, ...ids.filter((id) => !keptSet.has(id))];
+      const same =
+        next.length === prev.length && next.every((v, i) => v === prev[i]);
+      return same ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handKey]);
+
+  // The hand in display order. Falls back to hand order for any id not yet in
+  // `order` (covers the render before the reconcile effect runs).
+  const handById = useMemo(
+    () => new Map(human.hand.map((c) => [c.id, c])),
+    [human.hand]
+  );
+  const orderedHand = useMemo(() => {
+    const out: Card[] = [];
+    const seen = new Set<string>();
+    for (const id of order) {
+      const c = handById.get(id);
+      if (c && !seen.has(id)) {
+        out.push(c);
+        seen.add(id);
+      }
+    }
+    for (const c of human.hand) {
+      if (!seen.has(c.id)) {
+        out.push(c);
+        seen.add(c.id);
+      }
+    }
+    return out;
+  }, [order, handById, human.hand]);
+
+  const sortHand = () => {
+    Haptics.selectionAsync().catch(() => {});
+    const ids = [...human.hand]
+      .sort(
+        (a, b) =>
+          (SUIT_SORT[a.suit] ?? 9) - (SUIT_SORT[b.suit] ?? 9) ||
+          (RANK_SORT[a.rank] ?? 0) - (RANK_SORT[b.rank] ?? 0)
+      )
+      .map((c) => c.id);
+    setOrder(ids);
+  };
+
+  // Build touch handlers for the card at `index`. A quick tap plays/selects it
+  // (via handlePress); a long-press or horizontal drag picks it up and drops it
+  // at a new position. Reordering works on any turn — it's purely cosmetic.
+  const makeCardHandlers = (index: number, card: Card) => {
+    const endDrag = () => {
+      const ds = dragRef.current;
+      dragRef.current = null;
+      if (ds?.timer) clearTimeout(ds.timer);
+      setDragId(null);
+      pan.setValue({ x: 0, y: 0 });
+      return ds;
+    };
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        pan.setValue({ x: 0, y: 0 });
+        const ds = {
+          id: card.id,
+          startIndex: index,
+          started: false,
+          timer: null as ReturnType<typeof setTimeout> | null,
+        };
+        dragRef.current = ds;
+        ds.timer = setTimeout(() => {
+          if (dragRef.current === ds) {
+            ds.started = true;
+            setDragId(card.id);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          }
+        }, 180);
+      },
+      onPanResponderMove: (_e, g) => {
+        const ds = dragRef.current;
+        if (!ds) return;
+        if (!ds.started) {
+          // A deliberate sideways move also starts the drag immediately.
+          if (Math.abs(g.dx) > 12 || Math.abs(g.dy) > 12) {
+            if (ds.timer) clearTimeout(ds.timer);
+            ds.started = true;
+            setDragId(card.id);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          } else {
+            return;
+          }
+        }
+        pan.setValue({ x: g.dx, y: g.dy });
+      },
+      onPanResponderRelease: (_e, g) => {
+        const ds = endDrag();
+        if (!ds) return;
+        if (!ds.started) {
+          handlePress(card); // it was a tap
+          return;
+        }
+        if (step <= 0) return; // single card — nothing to reorder
+        const ids = orderedHand.map((c) => c.id);
+        const from = ids.indexOf(ds.id);
+        if (from < 0) return;
+        const target = Math.max(
+          0,
+          Math.min(ids.length - 1, Math.round(ds.startIndex + g.dx / step))
+        );
+        if (target === from) return;
+        ids.splice(from, 1);
+        ids.splice(target, 0, ds.id);
+        setOrder(ids);
+      },
+      onPanResponderTerminate: endDrag,
+    }).panHandlers;
+  };
+
   return (
     <SafeAreaView style={styles.root}>
       {/* Top bar */}
@@ -333,17 +487,24 @@ export function GameScreen({
             {human.name} · {human.hand.length} cards
             {state.announcedKadi[human.id] ? ' · Kadi!' : ''}
           </Text>
-          {canAnnounce && (
-            <Animated.View style={{ transform: [{ scale: pulse }] }}>
-              <Pressable style={styles.kadiBtn} onPress={onAnnounceKadi}>
-                <Text style={styles.kadiBtnText}>Niko Kadi! 🔔</Text>
+          <View style={styles.handHeaderRight}>
+            {human.hand.length > 1 && (
+              <Pressable style={styles.sortBtn} onPress={sortHand} hitSlop={6}>
+                <Text style={styles.sortBtnText}>Sort ⇄</Text>
               </Pressable>
-            </Animated.View>
-          )}
+            )}
+            {canAnnounce && (
+              <Animated.View style={{ transform: [{ scale: pulse }] }}>
+                <Pressable style={styles.kadiBtn} onPress={onAnnounceKadi}>
+                  <Text style={styles.kadiBtnText}>Niko Kadi! 🔔</Text>
+                </Pressable>
+              </Animated.View>
+            )}
+          </View>
         </View>
 
         <View style={styles.hand}>
-          {human.hand.map((c, i) => {
+          {orderedHand.map((c, i) => {
             const selOrder = selected.indexOf(c.id);
             const isSel = selOrder >= 0;
             const addable =
@@ -354,28 +515,32 @@ export function GameScreen({
               canAddCard(c);
             const highlight = isSel || addable;
             const lift = isSel ? -34 : addable ? -16 : 0;
+            const isDragging = dragId === c.id;
             return (
-              <View
+              <Animated.View
                 key={c.id}
+                {...makeCardHandlers(i, c)}
                 style={{
                   marginLeft: i === 0 ? 0 : overlapMargin,
-                  zIndex: i,
-                  transform: [{ translateY: lift }],
+                  zIndex: isDragging ? 999 : i,
+                  elevation: isDragging ? 12 : undefined,
+                  transform: isDragging
+                    ? [{ translateX: pan.x }, { translateY: pan.y }, { scale: 1.06 }]
+                    : [{ translateY: lift }],
                 }}
               >
                 <CardView
                   card={c}
                   size="lg"
                   playable={highlight}
-                  dimmed={assisted && isHumanTurn && !highlight}
-                  onPress={() => handlePress(c)}
+                  dimmed={assisted && isHumanTurn && !highlight && !isDragging}
                 />
                 {isSel && (
                   <View style={styles.selBadge}>
                     <Text style={styles.selBadgeText}>{selOrder + 1}</Text>
                   </View>
                 )}
-              </View>
+              </Animated.View>
             );
           })}
         </View>
@@ -557,6 +722,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   handTitle: { color: colors.text, fontWeight: '800' },
+  handHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sortBtn: {
+    backgroundColor: colors.feltDark,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.gold,
+  },
+  sortBtnText: { color: colors.gold, fontWeight: '800', fontSize: 13 },
   kadiBtn: {
     backgroundColor: colors.gold,
     paddingHorizontal: 14,
