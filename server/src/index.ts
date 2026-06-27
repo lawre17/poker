@@ -18,6 +18,7 @@ import {
   joinRoom,
   leaveRoom,
   pruneRooms,
+  requestRematch,
   startGame,
   timeoutMove,
 } from './rooms.js';
@@ -139,6 +140,17 @@ export function createApp(secret: string = INTERNAL_SECRET) {
       return;
     }
     const result = timeoutMove(String(req.params.matchId), String(userId));
+    res.json(result);
+  });
+
+  // POST /matches/:matchId/rematch — opt into a rematch of a finished game.
+  app.post('/matches/:matchId/rematch', (req: Request, res: Response) => {
+    const { userId } = req.body ?? {};
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required.' });
+      return;
+    }
+    const result = requestRematch(String(req.params.matchId), String(userId));
     res.json(result);
   });
 

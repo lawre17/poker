@@ -28,12 +28,23 @@ export interface ChatPayload {
   fromName: string;
   text: string;
 }
+export interface RematchPayload {
+  ready: string[];
+  total: number;
+  cannot: boolean;
+}
+export interface RematchStartedPayload {
+  newMatchId: string;
+  roster: Roster;
+}
 
 export interface ReverbCallbacks {
   onGameState?: (payload: GameStatePayload) => void;
   onRoomState?: (payload: RoomStatePayload) => void;
   onAwarded?: (payload: AwardedPayload) => void;
   onChat?: (payload: ChatPayload) => void;
+  onRematch?: (payload: RematchPayload) => void;
+  onRematchStarted?: (payload: RematchStartedPayload) => void;
   onStatus?: (status: 'connecting' | 'connected' | 'subscribed' | 'closed') => void;
 }
 
@@ -180,6 +191,16 @@ export class ReverbClient {
       case 'chat': {
         const payload = this.parseData<ChatPayload>(msg.data);
         if (payload) this.callbacks.onChat?.(payload);
+        return;
+      }
+      case 'rematch': {
+        const payload = this.parseData<RematchPayload>(msg.data);
+        if (payload) this.callbacks.onRematch?.(payload);
+        return;
+      }
+      case 'rematchStarted': {
+        const payload = this.parseData<RematchStartedPayload>(msg.data);
+        if (payload) this.callbacks.onRematchStarted?.(payload);
         return;
       }
       default:

@@ -107,13 +107,17 @@ function AppContent() {
     );
   }
 
-  // Online game.
+  // Online game. Keyed by matchId so a rematch remounts into a fresh game.
   if (route.name === 'online') {
     return (
       <OnlineGameScreen
+        key={route.match.matchId}
         matchId={route.match.matchId}
         roster={route.match.roster}
         onExit={leaveGame}
+        onRematch={(newMatchId, roster) =>
+          enterGame({ matchId: newMatchId, roster })
+        }
       />
     );
   }

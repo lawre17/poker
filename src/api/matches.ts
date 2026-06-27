@@ -100,6 +100,22 @@ export function leaveMatch(matchId: string): Promise<{ ok: boolean }> {
   });
 }
 
+export interface RematchResponse {
+  ok: boolean;
+  started: boolean;
+  newMatchId: string | null;
+  roster: Roster;
+  cannot: boolean;
+}
+
+// Opt into a rematch of a finished game. When everyone accepts, the server
+// returns/broadcasts the new match to drop into.
+export function requestRematch(matchId: string): Promise<RematchResponse> {
+  return apiFetch<RematchResponse>(`/matches/${matchId}/rematch`, {
+    method: 'POST',
+  });
+}
+
 // Ask the server to skip the current player if they've stalled past the turn
 // timeout. A premature request is a harmless no-op (the server is the clock).
 export function pingTimeout(

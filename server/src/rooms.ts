@@ -42,6 +42,8 @@ export interface Room {
   lastActivityAt: number; // epoch ms; bumped on every room-touching op (for pruning)
   turnStartedAt: number; // epoch ms the current player's turn began (for timeouts)
   leftUserIds: Set<string>; // humans who left/forfeited — their turns are auto-skipped
+  rematchReady: Set<string>; // userIds who accepted a rematch after the game ended
+  rematchMatchId: string | null; // the created rematch room, once everyone accepted
 }
 
 // How long a present player may stall before any waiting player can skip them.
@@ -146,6 +148,8 @@ export function createRoom(opts: {
     lastActivityAt: Date.now(),
     turnStartedAt: Date.now(),
     leftUserIds: new Set<string>(),
+    rematchReady: new Set<string>(),
+    rematchMatchId: null,
   };
 
   // Host takes seat 0.
@@ -501,6 +505,100 @@ export function timeoutMove(matchId: string, requesterId: string): TimeoutResult
     finished,
     winnerUserId: finished ? winnerUserIdFor(room) : null,
   };
+}
+
+// ---- rematch ----
+
+export interface RematchResult {
+  started: boolean;
+  ready: string[]; // userIds who've accepted so far
+  total: number; // how many humans need to accept
+  newMatchId: string | null;
+  code: string | null;
+  hostUserId: string | null;
+  roster: RosterEntry[];
+  states: GameState[];
+  cannot: boolean; // a rematch isn't possible (e.g. <2 players remain)
+}
+
+// A participant of a FINISHED match opts into a rematch. Once every remaining
+// (non-left) human has opted in, a fresh room with the same players + AI count
+// is created and started, and its id is returned so clients can jump straight in.
+export function requestRematch(oldMatchId: string, userId: string): RematchResult {
+  const room = getRoomByMatch(oldMatchId);
+  if (!room) throw new EngineApiError('Match not found.', 404);
+  if (room.phase !== 'finished') {
+    throw new EngineApiError('The game is not finished yet.', 409);
+  }
+  if (!room.players.some((p) => p.userId === userId && !p.isAI)) {
+    throw new EngineApiError('You are not in this match.', 403);
+  }
+  room.lastActivityAt = Date.now();
+
+  const needed = room.players
+    .filter((p) => !p.isAI && !room.leftUserIds.has(p.userId))
+    .sort((a, b) => a.seatIndex - b.seatIndex);
+  const aiCount = room.players.filter((p) => p.isAI).length;
+
+  const result = (extra: Partial<RematchResult> = {}): RematchResult => ({
+    started: false,
+    ready: [...room.rematchReady],
+    total: needed.length,
+    newMatchId: null,
+    code: null,
+    hostUserId: null,
+    roster: [],
+    states: [],
+    cannot: false,
+    ...extra,
+  });
+
+  // Already created (someone completed it first) — return it idempotently.
+  if (room.rematchMatchId) {
+    const nr = getRoomByMatch(room.rematchMatchId);
+    return result({
+      started: true,
+      newMatchId: room.rematchMatchId,
+      code: nr?.roomCode ?? null,
+      hostUserId: nr?.hostUserId ?? null,
+      roster: nr ? roster(nr) : [],
+      states: nr?.state ? [nr.state] : [],
+    });
+  }
+
+  // Not enough players for a fresh game (e.g. the opponent left).
+  if (needed.length + aiCount < 2) {
+    return result({ cannot: true });
+  }
+
+  room.rematchReady.add(userId);
+
+  if (!needed.every((p) => room.rematchReady.has(p.userId))) {
+    return result(); // still waiting on others
+  }
+
+  // Everyone's in — build the rematch with the same players and AI count.
+  const host = needed[0];
+  const created = createRoom({
+    hostUserId: host.userId,
+    hostName: host.name,
+    settings: room.settings,
+    aiOpponents: aiCount,
+  });
+  for (const h of needed.slice(1)) {
+    joinRoom(created.code, { userId: h.userId, name: h.name });
+  }
+  const start = startGame(created.matchId, host.userId);
+  room.rematchMatchId = created.matchId;
+
+  return result({
+    started: true,
+    newMatchId: created.matchId,
+    code: created.code,
+    hostUserId: host.userId,
+    roster: start.roster,
+    states: start.states,
+  });
 }
 
 // ---- state ----

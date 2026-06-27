@@ -55,6 +55,15 @@ interface Props {
   selfId?: string;
   // Floating chat bubbles keyed by engine seat id (online play only).
   floats?: Record<string, { id: string; text: string }>;
+  // Rematch (online only): opt-in handler + current readiness.
+  onRematch?: () => void;
+  rematch?: {
+    total: number;
+    readyCount: number;
+    mineAccepted: boolean;
+    cannot: boolean;
+    requesterName: string | null;
+  } | null;
 }
 
 type AcePicker = null | { mode: 'single'; cardId: string } | { mode: 'commit' };
@@ -70,6 +79,8 @@ export function GameScreen({
   onExit,
   selfId = HUMAN_ID,
   floats,
+  onRematch,
+  rematch,
 }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [acePicker, setAcePicker] = useState<AcePicker>(null);
@@ -612,6 +623,34 @@ export function GameScreen({
                 ? '🎉 You win!'
                 : `${state.players.find((p) => p.id === state.winnerId)?.name} wins`}
             </Text>
+
+            {onRematch && !rematch?.cannot && (
+              <>
+                {rematch && rematch.readyCount > 0 && !rematch.mineAccepted && (
+                  <Text style={styles.rematchHint}>
+                    {rematch.requesterName
+                      ? `${rematch.requesterName} wants a rematch`
+                      : 'Rematch?'}
+                  </Text>
+                )}
+                {rematch?.mineAccepted ? (
+                  <View style={[styles.winBtn, styles.winBtnGhost]}>
+                    <Text style={styles.winBtnText}>
+                      Waiting… {rematch.readyCount}/{rematch.total}
+                    </Text>
+                  </View>
+                ) : (
+                  <Pressable style={styles.rematchBtn} onPress={onRematch}>
+                    <Text style={styles.rematchBtnText}>
+                      🔁 Rematch{rematch && rematch.readyCount > 0
+                        ? ` (${rematch.readyCount}/${rematch.total})`
+                        : ''}
+                    </Text>
+                  </Pressable>
+                )}
+              </>
+            )}
+
             <Pressable style={styles.winBtn} onPress={onExit}>
               <Text style={styles.winBtnText}>Back to menu</Text>
             </Pressable>
@@ -862,4 +901,13 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   winBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  winBtnGhost: { backgroundColor: colors.feltDark, opacity: 0.85 },
+  rematchHint: { fontSize: 15, fontWeight: '700', color: colors.black, marginTop: -4 },
+  rematchBtn: {
+    backgroundColor: colors.gold,
+    paddingHorizontal: 26,
+    paddingVertical: 13,
+    borderRadius: 24,
+  },
+  rematchBtnText: { color: colors.black, fontWeight: '900', fontSize: 17 },
 });

@@ -7,6 +7,7 @@ import {
   getMatchState,
   leaveMatch,
   pingTimeout,
+  requestRematch,
   Roster,
   sendChat,
   sendMove,
@@ -40,6 +41,8 @@ interface UseOnlineGameArgs {
   // user to their engine id so GameScreen renders the right hand.
   roster: Roster;
   onExit: () => void;
+  // Called when a rematch has been created — jump into the new match.
+  onRematch?: (newMatchId: string, roster: Roster) => void;
 }
 
 function hapticLight() {
@@ -52,7 +55,12 @@ function hapticLight() {
  * Each action POSTs a Move to the server; the resulting state arrives over the
  * socket.
  */
-export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
+export function useOnlineGame({
+  matchId,
+  roster,
+  onExit,
+  onRematch,
+}: UseOnlineGameArgs) {
   const { token, user, refreshMe } = useAuth();
   const [state, setState] = useState<GameState | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -69,6 +77,16 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     {}
   );
   const floatSeq = useRef(0);
+
+  // Rematch readiness after a finished game (null until someone opts in).
+  const [rematch, setRematch] = useState<{
+    ready: string[];
+    total: number;
+    cannot: boolean;
+  } | null>(null);
+  // Navigation callback in a ref so the socket effect needn't depend on it.
+  const onRematchRef = useRef(onRematch);
+  onRematchRef.current = onRematch;
 
   const clientRef = useRef<ReverbClient | null>(null);
   const fbTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -167,6 +185,9 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
           }, 3500);
         }
       },
+      onRematch: (p) =>
+        setRematch({ ready: p.ready, total: p.total, cannot: p.cannot }),
+      onRematchStarted: (p) => onRematchRef.current?.(p.newMatchId, p.roster),
       onStatus: (s) => setStatus(s),
     });
     clientRef.current = client;
@@ -326,6 +347,59 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
 
   const markChatRead = useCallback(() => setUnreadChat(0), []);
 
+  // --- Rematch --------------------------------------------------------------
+  const acceptRematch = useCallback(() => {
+    void requestRematch(matchId)
+      .then((res) => {
+        if (res.cannot) {
+          showFeedback("Can't rematch — not enough players.");
+          return;
+        }
+        // The accepter who completes it gets the new match directly; others get
+        // it via the rematchStarted broadcast.
+        if (res.started && res.newMatchId) {
+          onRematchRef.current?.(res.newMatchId, res.roster);
+        }
+      })
+      .catch(() => showFeedback('Could not request a rematch.'));
+  }, [matchId, showFeedback]);
+
+  const myId = user != null ? String(user.id) : null;
+  const rematchInfo = rematch
+    ? {
+        total: rematch.total,
+        readyCount: rematch.ready.length,
+        mineAccepted: myId != null && rematch.ready.map(String).includes(myId),
+        cannot: rematch.cannot,
+        requesterName: (() => {
+          const otherId = rematch.ready
+            .map(String)
+            .find((id) => id !== myId);
+          const entry = currentRoster.find(
+            (r) => String(r.userId) === otherId
+          );
+          return entry?.name ?? null;
+        })(),
+      }
+    : null;
+
+  // While waiting on others after accepting, re-poll so a missed rematchStarted
+  // broadcast still lands us in the new game (the request is idempotent).
+  const waiting = rematchInfo?.mineAccepted ?? false;
+  useEffect(() => {
+    if (!waiting) return;
+    const id = setInterval(() => {
+      void requestRematch(matchId)
+        .then((res) => {
+          if (res.started && res.newMatchId) {
+            onRematchRef.current?.(res.newMatchId, res.roster);
+          }
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(id);
+  }, [waiting, matchId]);
+
   return {
     state,
     feedback,
@@ -345,5 +419,8 @@ export function useOnlineGame({ matchId, roster, onExit }: UseOnlineGameArgs) {
     sendChatMessage,
     markChatRead,
     floats,
+    // Rematch
+    rematchInfo,
+    acceptRematch,
   };
 }

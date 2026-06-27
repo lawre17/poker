@@ -18,9 +18,10 @@ interface Props {
   matchId: string;
   roster: Roster;
   onExit: () => void;
+  onRematch: (newMatchId: string, roster: Roster) => void;
 }
 
-export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
+export function OnlineGameScreen({ matchId, roster, onExit, onRematch }: Props) {
   const {
     state,
     feedback,
@@ -38,7 +39,9 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
     sendChatMessage,
     markChatRead,
     floats,
-  } = useOnlineGame({ matchId, roster, onExit });
+    rematchInfo,
+    acceptRematch,
+  } = useOnlineGame({ matchId, roster, onExit, onRematch });
 
   // Leaving an in-progress game forfeits it, so confirm first.
   const confirmLeave = () => {
@@ -88,6 +91,8 @@ export function OnlineGameScreen({ matchId, roster, onExit }: Props) {
         onAnnounceKadi={announceKadi}
         onExit={confirmLeave}
         floats={floats}
+        onRematch={acceptRematch}
+        rematch={rematchInfo}
       />
       <ChatPanel
         messages={messages}
