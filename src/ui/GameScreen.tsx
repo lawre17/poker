@@ -24,9 +24,14 @@ import { SuitPicker } from './SuitPicker';
 import { colors, suitColor, suitSymbol } from './theme';
 import { HUMAN_ID } from './useGame';
 
-// Width of a large card (must match CardView's `lg` size).
+// Size of a large card (must match CardView's `lg` size).
 const HAND_CARD_W = 92;
-const HAND_GAP = 8; // ideal gap between cards when they all fit
+const HAND_CARD_H = 132;
+// Radial fan tuning: total arc is capped so many cards still fit on screen, and
+// the pivot sits below the cards (as a % of card height) to set the curve.
+const FAN_MAX_SPREAD = 64; // max total degrees across the whole hand
+const FAN_PER_CARD = 8; // degrees between adjacent cards (before the cap)
+const FAN_ORIGIN_PCT = 240; // transform-origin Y: pivot below the card (curve)
 
 // Ordering used by the "Sort" button: group by suit, then by rank.
 const SUIT_SORT: Record<string, number> = {
@@ -94,6 +99,8 @@ export function GameScreen({
     startIndex: number;
     started: boolean;
     timer: ReturnType<typeof setTimeout> | null;
+    ox: number; // card's fan x-offset from centre at grab time
+    oy: number; // card's fan y-offset (edge cards sit lower)
   } | null>(null);
 
   const human =
@@ -114,16 +121,28 @@ export function GameScreen({
     .map((id) => human.hand.find((c) => c.id === id))
     .filter((c): c is Card => !!c);
 
-  // Fan the hand: spread cards evenly, overlapping as needed so they all fit.
+  // Fan the hand as a radial arc so it holds many cards: every card rotates
+  // around a shared pivot below the hand, with the spread capped to fit on
+  // screen (the angle per card shrinks as the hand grows).
   const { width: screenW } = useWindowDimensions();
   const handCount = human.hand.length;
-  const available = screenW - 24; // leave a little side padding
-  const fullStep = HAND_CARD_W + HAND_GAP;
-  const step =
-    handCount > 1
-      ? Math.min(fullStep, (available - HAND_CARD_W) / (handCount - 1))
-      : 0;
-  const overlapMargin = step - HAND_CARD_W; // negative when overlapping
+  const fanSpread = Math.min(FAN_MAX_SPREAD, (handCount - 1) * FAN_PER_CARD);
+  const anglePer = handCount > 1 ? fanSpread / (handCount - 1) : 0;
+  const fanMid = (handCount - 1) / 2;
+  // Distance from a card's centre to the pivot (used to place each card on the arc).
+  const fanRadius = HAND_CARD_H * (FAN_ORIGIN_PCT / 100 - 0.5);
+  const handLeft = screenW / 2 - HAND_CARD_W / 2;
+  // Edge cards sit lower on the arc; lift the whole fan so they clear the bottom,
+  // and give the container enough height for the raised middle card + pop-up.
+  const fanDrop =
+    fanRadius * (1 - Math.cos((fanSpread / 2) * (Math.PI / 180)));
+  const fanBottom = Math.round(fanDrop) + 6;
+  const fanHeight = fanBottom + HAND_CARD_H + 50;
+  // A card's centre offset (from the fan centre) for its index — used to lift a
+  // dragged card from exactly where it sits and to pick the nearest drop slot.
+  const fanRad = (idx: number) => ((idx - fanMid) * anglePer * Math.PI) / 180;
+  const fanX = (idx: number) => fanRadius * Math.sin(fanRad(idx));
+  const fanY = (idx: number) => fanRadius * (1 - Math.cos(fanRad(idx)));
 
   // Can this card be added to the current selection?
   const canAddCard = (card: Card): boolean => {
@@ -309,41 +328,43 @@ export function GameScreen({
       pan.setValue({ x: 0, y: 0 });
       return ds;
     };
+    const ox = fanX(index);
+    const oy = fanY(index);
+    const startDrag = () => {
+      const ds = dragRef.current;
+      if (!ds || ds.started) return;
+      if (ds.timer) clearTimeout(ds.timer);
+      ds.started = true;
+      setDragId(card.id);
+      // Lift the card from exactly where it sits in the fan (no jump).
+      pan.setValue({ x: ox, y: oy });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    };
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        pan.setValue({ x: 0, y: 0 });
+        pan.setValue({ x: ox, y: oy });
         const ds = {
           id: card.id,
           startIndex: index,
           started: false,
           timer: null as ReturnType<typeof setTimeout> | null,
+          ox,
+          oy,
         };
         dragRef.current = ds;
-        ds.timer = setTimeout(() => {
-          if (dragRef.current === ds) {
-            ds.started = true;
-            setDragId(card.id);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-          }
-        }, 180);
+        ds.timer = setTimeout(startDrag, 160);
       },
       onPanResponderMove: (_e, g) => {
         const ds = dragRef.current;
         if (!ds) return;
         if (!ds.started) {
-          // A deliberate sideways move also starts the drag immediately.
-          if (Math.abs(g.dx) > 12 || Math.abs(g.dy) > 12) {
-            if (ds.timer) clearTimeout(ds.timer);
-            ds.started = true;
-            setDragId(card.id);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-          } else {
-            return;
-          }
+          // A deliberate move also starts the drag immediately.
+          if (Math.abs(g.dx) > 10 || Math.abs(g.dy) > 10) startDrag();
+          else return;
         }
-        pan.setValue({ x: g.dx, y: g.dy });
+        pan.setValue({ x: ds.ox + g.dx, y: ds.oy + g.dy });
       },
       onPanResponderRelease: (_e, g) => {
         const ds = endDrag();
@@ -352,14 +373,21 @@ export function GameScreen({
           handlePress(card); // it was a tap
           return;
         }
-        if (step <= 0) return; // single card — nothing to reorder
         const ids = orderedHand.map((c) => c.id);
+        if (ids.length < 2) return;
         const from = ids.indexOf(ds.id);
         if (from < 0) return;
-        const target = Math.max(
-          0,
-          Math.min(ids.length - 1, Math.round(ds.startIndex + g.dx / step))
-        );
+        // Drop into the slot whose fan position is nearest the card's centre.
+        const curX = ds.ox + g.dx;
+        let target = 0;
+        let best = Infinity;
+        for (let j = 0; j < ids.length; j++) {
+          const d = Math.abs(fanX(j) - curX);
+          if (d < best) {
+            best = d;
+            target = j;
+          }
+        }
         if (target === from) return;
         ids.splice(from, 1);
         ids.splice(target, 0, ds.id);
@@ -530,26 +558,34 @@ export function GameScreen({
           </View>
         </View>
 
-        <View style={styles.hand}>
+        <View style={[styles.hand, { height: fanHeight }]}>
           {orderedHand.map((c, i) => {
             const selOrder = selected.indexOf(c.id);
             const isSel = selOrder >= 0;
             const addable =
               assisted && isHumanTurn && !isSel && canAddCard(c);
             const highlight = isSel || addable;
-            const lift = isSel ? -34 : addable ? -16 : 0;
+            const lift = isSel ? 38 : addable ? 18 : 0;
             const isDragging = dragId === c.id;
+            const angle = (i - fanMid) * anglePer;
             return (
               <Animated.View
                 key={c.id}
                 {...makeCardHandlers(i, c)}
                 style={{
-                  marginLeft: i === 0 ? 0 : overlapMargin,
+                  position: 'absolute',
+                  left: handLeft,
+                  bottom: fanBottom,
                   zIndex: isDragging ? 999 : i,
-                  elevation: isDragging ? 12 : undefined,
+                  elevation: isDragging ? 12 : i,
+                  // While dragged the card follows the finger upright; otherwise
+                  // it sits in the fan, rotating around the shared pivot below.
+                  transformOrigin: isDragging
+                    ? ['50%', '50%', 0]
+                    : ['50%', `${FAN_ORIGIN_PCT}%`, 0],
                   transform: isDragging
                     ? [{ translateX: pan.x }, { translateY: pan.y }, { scale: 1.06 }]
-                    : [{ translateY: lift }],
+                    : [{ rotate: `${angle}deg` }, { translateY: -lift }],
                 }}
               >
                 <CardView
@@ -819,12 +855,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   hand: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    paddingTop: 20, // headroom for lifted (playable) cards
-    minHeight: 156,
+    position: 'relative',
+    width: '100%',
+    alignSelf: 'stretch',
   },
   hint: {
     color: colors.textMuted,
