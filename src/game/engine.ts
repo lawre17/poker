@@ -134,8 +134,15 @@ function drawCards(state: GameState, player: Player, n: number): void {
   if (!state.declaredThisTurn) state.announcedKadi[player.id] = false;
 }
 
+// Only the most recent entries are ever shown, and the whole state is broadcast
+// over Reverb (which caps message size), so keep the log bounded — an unbounded
+// log eventually pushes the payload past the limit ("Pusher payload too large").
+const MAX_LOG = 40;
 function log(state: GameState, msg: string): void {
   state.log.push(msg);
+  if (state.log.length > MAX_LOG) {
+    state.log = state.log.slice(-MAX_LOG);
+  }
 }
 
 // ---- the reducer ----
