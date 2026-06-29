@@ -72,7 +72,7 @@ export interface GameSettings {
 
 export const DEFAULT_SETTINGS: GameSettings = {
   stackingPenalties: false,
-  assistedMode: true,
+  assistedMode: false,
 };
 
 export type Phase = 'playing' | 'finished';

@@ -13,6 +13,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import {
   applyHumanMove,
   createRoom,
+  createSeededMatch,
   EngineApiError,
   getState,
   joinRoom,
@@ -108,6 +109,22 @@ export function createApp(secret: string = INTERNAL_SECRET) {
     }
     const result = startGame(String(req.params.code), String(userId));
     res.json(result);
+  });
+
+  // POST /tournament-matches — seat a fixed human roster (no AI) and start it
+  // immediately. Used by the tournament orchestrator to spin up each table.
+  app.post('/tournament-matches', (req: Request, res: Response) => {
+    const { players, settings } = req.body ?? {};
+    if (!Array.isArray(players) || players.length < 2) {
+      res.status(400).json({ error: 'players (at least 2) are required.' });
+      return;
+    }
+    const norm = players.map((p: { userId: unknown; name: unknown }) => ({
+      userId: String(p.userId),
+      name: String(p.name),
+    }));
+    const result = createSeededMatch(norm, settings);
+    res.status(201).json(result);
   });
 
   // POST /matches/:matchId/move — apply a human move + all following AI moves.

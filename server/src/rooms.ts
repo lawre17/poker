@@ -81,6 +81,10 @@ export class EngineApiError extends Error {
 const rooms = new Map<string, Room>(); // keyed by roomCode
 const matchIndex = new Map<string, Room>(); // matchId -> room
 
+// Max seats at one table (humans + AI combined). The 52-card deck deals 3 cards
+// each above 3 players, so 6 seats = 18 dealt, leaving a healthy draw pile.
+export const MAX_SEATS = 6;
+
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
 
 function genRoomCode(): string {
@@ -134,7 +138,7 @@ export function createRoom(opts: {
   settings?: GameSettings;
   aiOpponents?: number;
 }): CreateRoomResult {
-  const aiOpponents = Math.max(0, Math.min(3, opts.aiOpponents ?? 0));
+  const aiOpponents = Math.max(0, Math.min(MAX_SEATS - 1, opts.aiOpponents ?? 0));
   const roomCode = genRoomCode();
   const matchId = uuid();
   const room: Room = {
@@ -201,7 +205,7 @@ export function joinRoom(
   // and push AI seats after them so engine ids stay tidy.
   const humans = room.players.filter((p) => !p.isAI);
   const ais = room.players.filter((p) => p.isAI);
-  if (humans.length + ais.length >= 4) {
+  if (humans.length + ais.length >= MAX_SEATS) {
     throw new EngineApiError('Room is full.', 409);
   }
   humans.push({
@@ -220,6 +224,48 @@ export function joinRoom(
   room.players = ordered;
 
   return { matchId: room.matchId, roster: roster(room) };
+}
+
+// ---- tournament tables ----
+
+export interface SeededMatchResult {
+  matchId: string;
+  code: string;
+  states: GameState[];
+  roster: RosterEntry[];
+}
+
+// Create and immediately start a fixed-roster, human-only match — a tournament
+// table. There is no AI and no join step: Laravel seats everyone up front. The
+// first player is the (nominal) host. Reuses the normal room lifecycle so the
+// match behaves exactly like any other online game from here on.
+export function createSeededMatch(
+  players: { userId: string; name: string }[],
+  settings?: GameSettings
+): SeededMatchResult {
+  if (players.length < 2) {
+    throw new EngineApiError('A table needs at least 2 players.', 400);
+  }
+  if (players.length > MAX_SEATS) {
+    throw new EngineApiError(`A table holds at most ${MAX_SEATS} players.`, 400);
+  }
+  const [host, ...rest] = players;
+  const created = createRoom({
+    hostUserId: host.userId,
+    hostName: host.name,
+    settings,
+    aiOpponents: 0,
+  });
+  for (const p of rest) {
+    joinRoom(created.code, { userId: p.userId, name: p.name });
+  }
+  const start = startGame(created.matchId, host.userId);
+  return {
+    matchId: created.matchId,
+    code: created.code,
+    states: start.states,
+    roster: start.roster,
+  };
 }
 
 // ---- starting a game ----

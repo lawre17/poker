@@ -25,7 +25,7 @@ let wins = 0;
 let stalls = 0;
 const winnerLastCardsAlwaysPlain = { ok: true };
 
-for (const numPlayers of [2, 3, 4, 5]) {
+for (const numPlayers of [2, 3, 4, 5, 6]) {
   for (let i = 0; i < 2000; i++) {
     const { state, turns } = playOut(numPlayers);
     games++;

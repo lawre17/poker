@@ -1,5 +1,9 @@
 import { GameState } from '../game/types';
 import { Roster } from '../api/matches';
+import {
+  TournamentSummary,
+  TournamentTablePayload,
+} from '../api/tournaments';
 import { API_BASE } from '../api/client';
 
 // Reverb (Pusher protocol) client built on the RN global WebSocket. No
@@ -37,6 +41,20 @@ export interface RematchStartedPayload {
   newMatchId: string;
   roster: Roster;
 }
+export interface TournamentUpdatePayload {
+  tournament: TournamentSummary;
+}
+export interface TournamentMatchReadyPayload {
+  round: number;
+  tables: TournamentTablePayload[];
+  byes: number[];
+}
+export interface TournamentFinishedPayload {
+  winnerUserId: number | null;
+  winnerName: string;
+  prize: number;
+  standings: TournamentSummary['players'];
+}
 
 export interface ReverbCallbacks {
   onGameState?: (payload: GameStatePayload) => void;
@@ -45,6 +63,9 @@ export interface ReverbCallbacks {
   onChat?: (payload: ChatPayload) => void;
   onRematch?: (payload: RematchPayload) => void;
   onRematchStarted?: (payload: RematchStartedPayload) => void;
+  onTournamentUpdate?: (payload: TournamentUpdatePayload) => void;
+  onTournamentMatchReady?: (payload: TournamentMatchReadyPayload) => void;
+  onTournamentFinished?: (payload: TournamentFinishedPayload) => void;
   onStatus?: (status: 'connecting' | 'connected' | 'subscribed' | 'closed') => void;
 }
 
@@ -74,9 +95,12 @@ export class ReverbClient {
   constructor(
     private matchId: string,
     private token: string,
-    private callbacks: ReverbCallbacks
+    private callbacks: ReverbCallbacks,
+    // Optional explicit channel. Defaults to the per-match channel; pass e.g.
+    // `private-tournament.{id}` to listen on a tournament channel instead.
+    channel?: string
   ) {
-    this.channel = `private-match.${matchId}`;
+    this.channel = channel ?? `private-match.${matchId}`;
   }
 
   connect(): void {
@@ -201,6 +225,21 @@ export class ReverbClient {
       case 'rematchStarted': {
         const payload = this.parseData<RematchStartedPayload>(msg.data);
         if (payload) this.callbacks.onRematchStarted?.(payload);
+        return;
+      }
+      case 'update': {
+        const payload = this.parseData<TournamentUpdatePayload>(msg.data);
+        if (payload) this.callbacks.onTournamentUpdate?.(payload);
+        return;
+      }
+      case 'matchReady': {
+        const payload = this.parseData<TournamentMatchReadyPayload>(msg.data);
+        if (payload) this.callbacks.onTournamentMatchReady?.(payload);
+        return;
+      }
+      case 'finished': {
+        const payload = this.parseData<TournamentFinishedPayload>(msg.data);
+        if (payload) this.callbacks.onTournamentFinished?.(payload);
         return;
       }
       default:

@@ -16,7 +16,12 @@ import { LobbyScreen, OnlineMatch } from './src/ui/LobbyScreen';
 import { LoginScreen } from './src/ui/LoginScreen';
 import { OnlineGameScreen } from './src/ui/OnlineGameScreen';
 import { RegisterScreen } from './src/ui/RegisterScreen';
+import { SettingsProvider } from './src/ui/SettingsContext';
+import { SettingsScreen } from './src/ui/SettingsScreen';
 import { SplashScreen } from './src/ui/SplashScreen';
+import { TournamentLobbyScreen } from './src/ui/TournamentLobbyScreen';
+import { TournamentScreen } from './src/ui/TournamentScreen';
+import { TournamentSummary } from './src/api/tournaments';
 import { colors } from './src/ui/theme';
 import { useGame } from './src/ui/useGame';
 
@@ -25,6 +30,9 @@ const queryClient = new QueryClient();
 type Route =
   | { name: 'home' }
   | { name: 'lobby' }
+  | { name: 'settings' }
+  | { name: 'tourneyLobby' }
+  | { name: 'tournament'; id: string; initial: TournamentSummary | null }
   | { name: 'online'; match: OnlineMatch };
 
 function AppContent() {
@@ -132,11 +140,42 @@ function AppContent() {
     );
   }
 
+  // Settings.
+  if (route.name === 'settings') {
+    return <SettingsScreen onExit={() => setRoute({ name: 'home' })} />;
+  }
+
+  // Tournament create/join.
+  if (route.name === 'tourneyLobby') {
+    return (
+      <TournamentLobbyScreen
+        onExit={() => setRoute({ name: 'home' })}
+        onEnter={(t) =>
+          setRoute({ name: 'tournament', id: t.id, initial: t })
+        }
+      />
+    );
+  }
+
+  // Active tournament (board → tables → results).
+  if (route.name === 'tournament') {
+    return (
+      <TournamentScreen
+        key={route.id}
+        tournamentId={route.id}
+        initial={route.initial}
+        onExit={() => setRoute({ name: 'home' })}
+      />
+    );
+  }
+
   // Home.
   return (
     <HomeScreen
       onStart={newGame}
       onPlayOnline={() => setRoute({ name: 'lobby' })}
+      onPlayTournament={() => setRoute({ name: 'tourneyLobby' })}
+      onOpenSettings={() => setRoute({ name: 'settings' })}
       resumeMatch={resume}
       onResume={() => resume && setRoute({ name: 'online', match: resume })}
       onForgetResume={leaveGame}
@@ -150,14 +189,16 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <SafeAreaProvider>
-          <StatusBar style="light" />
-          {showSplash ? (
-            <SplashScreen onDone={() => setShowSplash(false)} />
-          ) : (
-            <AppContent />
-          )}
-        </SafeAreaProvider>
+        <SettingsProvider>
+          <SafeAreaProvider>
+            <StatusBar style="light" />
+            {showSplash ? (
+              <SplashScreen onDone={() => setShowSplash(false)} />
+            ) : (
+              <AppContent />
+            )}
+          </SafeAreaProvider>
+        </SettingsProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

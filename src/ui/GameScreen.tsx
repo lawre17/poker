@@ -69,6 +69,9 @@ interface Props {
     cannot: boolean;
     requesterName: string | null;
   } | null;
+  // Label of the post-game button (defaults to "Back to menu"). Tournament
+  // matches override it to return to the bracket.
+  exitLabel?: string;
 }
 
 type AcePicker = null | { mode: 'single'; cardId: string } | { mode: 'commit' };
@@ -86,6 +89,7 @@ export function GameScreen({
   floats,
   onRematch,
   rematch,
+  exitLabel = 'Back to menu',
 }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [acePicker, setAcePicker] = useState<AcePicker>(null);
@@ -688,7 +692,7 @@ export function GameScreen({
             )}
 
             <Pressable style={styles.winBtn} onPress={onExit}>
-              <Text style={styles.winBtnText}>Back to menu</Text>
+              <Text style={styles.winBtnText}>{exitLabel}</Text>
             </Pressable>
           </Animated.View>
         </View>

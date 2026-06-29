@@ -42,10 +42,10 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Host config (reuse HomeScreen control style).
+  // Host config (reuse HomeScreen control style). Assisted mode is intentionally
+  // omitted online — card hints would be unfair against real opponents.
   const [aiOpponents, setAiOpponents] = useState(0);
   const [stacking, setStacking] = useState(false);
-  const [assisted, setAssisted] = useState(true);
 
   // Join input.
   const [joinCode, setJoinCode] = useState('');
@@ -92,7 +92,7 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
     try {
       const res = await createMatch({
         aiOpponents,
-        settings: { stackingPenalties: stacking, assistedMode: assisted },
+        settings: { stackingPenalties: stacking, assistedMode: false },
       });
       setCode(res.code);
       setMatchId(res.matchId);
@@ -193,7 +193,7 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
 
               <Text style={styles.label}>AI opponents</Text>
               <View style={styles.choices}>
-                {[0, 1, 2, 3].map((n) => (
+                {[0, 1, 2, 3, 4, 5].map((n) => (
                   <Pressable
                     key={n}
                     onPress={() => setAiOpponents(n)}
@@ -227,18 +227,6 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
                 <Switch
                   value={stacking}
                   onValueChange={setStacking}
-                  trackColor={{ true: colors.gold }}
-                />
-              </View>
-
-              <View style={styles.switchRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Assisted mode</Text>
-                  <Text style={styles.hint}>Highlights playable cards.</Text>
-                </View>
-                <Switch
-                  value={assisted}
-                  onValueChange={setAssisted}
                   trackColor={{ true: colors.gold }}
                 />
               </View>
@@ -348,7 +336,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: { color: colors.gold, fontWeight: '800', fontSize: 18 },
   label: { color: colors.text, fontWeight: '800', fontSize: 15 },
-  choices: { flexDirection: 'row', gap: 10 },
+  choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   choice: {
     width: 50,
     height: 50,

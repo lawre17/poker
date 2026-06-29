@@ -18,10 +18,19 @@ interface Props {
   matchId: string;
   roster: Roster;
   onExit: () => void;
-  onRematch: (newMatchId: string, roster: Roster) => void;
+  onRematch?: (newMatchId: string, roster: Roster) => void;
+  // Tournament table: no rematch (the bracket controls what's next) and the
+  // post-game button returns to the tournament board.
+  tournamentMode?: boolean;
 }
 
-export function OnlineGameScreen({ matchId, roster, onExit, onRematch }: Props) {
+export function OnlineGameScreen({
+  matchId,
+  roster,
+  onExit,
+  onRematch,
+  tournamentMode = false,
+}: Props) {
   const {
     state,
     feedback,
@@ -91,8 +100,9 @@ export function OnlineGameScreen({ matchId, roster, onExit, onRematch }: Props) 
         onAnnounceKadi={announceKadi}
         onExit={confirmLeave}
         floats={floats}
-        onRematch={acceptRematch}
-        rematch={rematchInfo}
+        onRematch={tournamentMode ? undefined : acceptRematch}
+        rematch={tournamentMode ? null : rematchInfo}
+        exitLabel={tournamentMode ? 'Back to tournament ▶' : 'Back to menu'}
       />
       <ChatPanel
         messages={messages}
