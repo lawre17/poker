@@ -7,6 +7,7 @@ import {
   leaveTournament,
   startTournament,
   TournamentSummary,
+  TournamentTableInfo,
 } from '../api/tournaments';
 import {
   ReverbClient,
@@ -42,6 +43,8 @@ export function useTournament({ tournamentId, initial }: UseTournamentArgs) {
   const [status, setStatus] = useState<TournamentConnStatus>('connecting');
   // Rosters seen in matchReady, so entering a table renders with names at once.
   const [tableRosters, setTableRosters] = useState<Record<string, Roster>>({});
+  // Bracket: every table across rounds (from the polled show endpoint).
+  const [tables, setTables] = useState<TournamentTableInfo[]>([]);
 
   const selfUserId = user != null ? Number(user.id) : -1;
 
@@ -50,6 +53,7 @@ export function useTournament({ tournamentId, initial }: UseTournamentArgs) {
       .then((res) => {
         setSummary(res.tournament);
         setMyMatchId(res.myMatchId);
+        setTables(res.tables ?? []);
         if (res.tournament.status === 'finished') {
           // Refresh the wallet in case a prize landed.
           void refreshMe();
@@ -129,6 +133,7 @@ export function useTournament({ tournamentId, initial }: UseTournamentArgs) {
     myMatchId,
     setMyMatchId,
     tableRosters,
+    tables,
     finished,
     status,
     myStatus,

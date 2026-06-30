@@ -45,6 +45,7 @@ export interface CreateTournamentOptions {
   format?: TournamentFormat;
   tableSize?: number;
   buyIn?: number;
+  roundsTotal?: number;
   settings?: GameSettings;
 }
 
@@ -55,6 +56,7 @@ export function createTournament(
   if (opts.format) body.format = opts.format;
   if (opts.tableSize !== undefined) body.tableSize = opts.tableSize;
   if (opts.buyIn !== undefined) body.buyIn = opts.buyIn;
+  if (opts.roundsTotal !== undefined) body.roundsTotal = opts.roundsTotal;
   if (opts.settings) body.settings = opts.settings;
   return apiFetch<TournamentSummary>('/tournaments', { method: 'POST', body });
 }
@@ -78,10 +80,19 @@ export function leaveTournament(id: string): Promise<{ ok: boolean }> {
   });
 }
 
+// A table in the bracket view (every round, oldest first).
+export interface TournamentTableInfo {
+  round: number;
+  status: 'pending' | 'running' | 'finished';
+  winnerUserId: number | null;
+  players: { userId: number; name: string }[];
+}
+
 export interface TournamentShowResponse {
   tournament: TournamentSummary;
   // The live table the caller is seated at in the current round, if any.
   myMatchId: string | null;
+  tables: TournamentTableInfo[];
 }
 
 export function getTournament(id: string): Promise<TournamentShowResponse> {

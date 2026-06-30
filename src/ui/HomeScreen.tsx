@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ActiveMatch } from '../api/activeMatch';
+import { ActiveTournament } from '../api/activeTournament';
 import { useAuth } from '../api/auth';
 import { useSettings } from './SettingsContext';
 import { NewGameOptions } from './useGame';
@@ -21,6 +22,9 @@ interface Props {
   resumeMatch?: ActiveMatch | null;
   onResume?: () => void;
   onForgetResume?: () => void;
+  resumeTournament?: ActiveTournament | null;
+  onResumeTournament?: () => void;
+  onForgetTournament?: () => void;
 }
 
 export function HomeScreen({
@@ -31,6 +35,9 @@ export function HomeScreen({
   resumeMatch,
   onResume,
   onForgetResume,
+  resumeTournament,
+  onResumeTournament,
+  onForgetTournament,
 }: Props) {
   const { user, logout } = useAuth();
   const { settings } = useSettings();
@@ -72,6 +79,22 @@ export function HomeScreen({
                 <Text style={styles.resumeBtnText}>Rejoin ▶</Text>
               </Pressable>
               <Pressable onPress={onForgetResume} hitSlop={8}>
+                <Text style={styles.resumeDismiss}>Dismiss</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {resumeTournament && (
+          <View style={styles.resumeCard}>
+            <Text style={styles.resumeText}>
+              You're in a tournament 🏆 {resumeTournament.code}
+            </Text>
+            <View style={styles.resumeRow}>
+              <Pressable style={styles.resumeBtn} onPress={onResumeTournament}>
+                <Text style={styles.resumeBtnText}>Rejoin ▶</Text>
+              </Pressable>
+              <Pressable onPress={onForgetTournament} hitSlop={8}>
                 <Text style={styles.resumeDismiss}>Dismiss</Text>
               </Pressable>
             </View>

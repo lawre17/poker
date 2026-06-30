@@ -63,6 +63,11 @@ export interface MoveResult {
   states: GameState[];
   finished: boolean;
   winnerUserId: string | null;
+  // When finished: every seat's userId ordered best -> worst (winner first, then
+  // fewest cards remaining). Empty while the game is still in progress. Used by
+  // league/survival tournaments which need a full finishing order, not just a
+  // single winner.
+  ranking: string[];
 }
 
 // A tagged error so the HTTP layer can map to a status code.
@@ -333,6 +338,31 @@ function winnerUserIdFor(room: Room): string | null {
   return winner.userId;
 }
 
+// Full finishing order (best -> worst) as userIds: the winner first, then the
+// rest by fewest cards left, ties broken by seat. Includes every seat (AI seats
+// too, by their string userId) — tournament tables are all-human so this is the
+// player order league/survival score against.
+function finishOrderFor(room: Room): string[] {
+  if (!room.state || room.state.phase !== 'finished') return [];
+  const winnerId = room.state.winnerId;
+  return room.state.players
+    .map((p) => {
+      const rp = playerByEngineId(room, p.id);
+      return {
+        userId: String(rp?.userId ?? p.id),
+        isWinner: p.id === winnerId,
+        cards: p.hand.length,
+        seat: rp?.seatIndex ?? 0,
+      };
+    })
+    .sort((a, b) => {
+      if (a.isWinner !== b.isWinner) return a.isWinner ? -1 : 1;
+      if (a.cards !== b.cards) return a.cards - b.cards;
+      return a.seat - b.seat;
+    })
+    .map((r) => r.userId);
+}
+
 /**
  * Apply a human move, then synchronously run every following AI move until it's
  * a human's turn or the game ends. Returns the full list of resulting states
@@ -391,6 +421,7 @@ export function applyHumanMove(
     states,
     finished,
     winnerUserId: finished ? winnerUserIdFor(room) : null,
+    ranking: finished ? finishOrderFor(room) : [],
   };
 }
 
@@ -507,6 +538,7 @@ export function leaveRoom(matchId: string, userId: string): MoveResult {
     states,
     finished,
     winnerUserId: finished ? winnerUserIdFor(room) : null,
+    ranking: finished ? finishOrderFor(room) : [],
   };
 }
 
@@ -523,6 +555,7 @@ export function timeoutMove(matchId: string, requesterId: string): TimeoutResult
     states: [],
     finished: false,
     winnerUserId: null,
+    ranking: [],
   };
   const room = getRoomByMatch(matchId);
   if (!room) throw new EngineApiError('Match not found.', 404);
@@ -550,6 +583,7 @@ export function timeoutMove(matchId: string, requesterId: string): TimeoutResult
     states,
     finished,
     winnerUserId: finished ? winnerUserIdFor(room) : null,
+    ranking: finished ? finishOrderFor(room) : [],
   };
 }
 

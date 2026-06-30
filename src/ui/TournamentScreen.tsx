@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,7 +10,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../api/auth';
-import { TournamentPlayerSummary, TournamentSummary } from '../api/tournaments';
+import {
+  TournamentPlayerSummary,
+  TournamentSummary,
+  TournamentTableInfo,
+} from '../api/tournaments';
 import { OnlineGameScreen } from './OnlineGameScreen';
 import { useTournament } from './useTournament';
 import { colors } from './theme';
@@ -21,12 +25,19 @@ interface Props {
   onExit: () => void;
 }
 
-// Sort for the standings list: champion first, then players still in, then the
-// eliminated by how far they got (later round = higher).
+// Sort for the standings list. Once finished, order by final place; while
+// running: champion, then players still in, then eliminated by how far they got.
 function rank(p: TournamentPlayerSummary): number {
-  if (p.status === 'champion') return 100000;
-  if (p.status === 'active' || p.status === 'registered') return 50000;
+  if (p.place) return 1_000_000 - p.place;
+  if (p.status === 'champion') return 1_000_000;
+  if (p.status === 'active' || p.status === 'registered') return 500_000;
   return p.eliminatedRound ?? 0;
+}
+
+function formatLabel(t: TournamentSummary): string {
+  if (t.format === 'league') return `League · ${t.roundsTotal ?? 3} rounds`;
+  if (t.format === 'survival') return 'Survival';
+  return 'Knockout';
 }
 
 export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
@@ -35,6 +46,7 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
     summary,
     myMatchId,
     tableRosters,
+    tables,
     finished,
     myStatus,
     selfUserId,
@@ -45,6 +57,16 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
 
   // The table the player is currently sitting at (null = on the board).
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
+  // A running table the player peeked away from — don't auto-yank them back.
+  const [dismissedMatchId, setDismissedMatchId] = useState<string | null>(null);
+
+  // Auto-enter a newly-ready table: being "present" means the in-table turn
+  // timeout covers anyone who drops, so a no-show can't stall the round. A table
+  // you deliberately backed out of isn't re-entered until a new one is seated.
+  useEffect(() => {
+    if (!myMatchId || activeMatchId || myMatchId === dismissedMatchId) return;
+    setActiveMatchId(myMatchId);
+  }, [myMatchId, activeMatchId, dismissedMatchId]);
 
   // Inside a table → hand off to the normal online game screen.
   if (activeMatchId) {
@@ -55,6 +77,7 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
         roster={tableRosters[activeMatchId] ?? []}
         tournamentMode
         onExit={() => {
+          setDismissedMatchId(activeMatchId);
           setActiveMatchId(null);
           refresh();
         }}
@@ -117,8 +140,7 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
           <Text style={styles.codeLabel}>CODE</Text>
           <Text style={styles.codeValue}>{summary.code}</Text>
           <Text style={styles.codeSub}>
-            {summary.format === 'bracket' ? 'Knockout' : summary.format} · up to{' '}
-            {summary.tableSize}/table
+            {formatLabel(summary)} · up to {summary.tableSize}/table
           </Text>
           {summary.buyIn > 0 && (
             <Text style={styles.pot}>
@@ -158,7 +180,10 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
             </View>
           ) : (
             <View style={styles.banner}>
-              <Text style={styles.bannerTitle}>Round {summary.currentRound}</Text>
+              <Text style={styles.bannerTitle}>
+                Round {summary.currentRound}
+                {summary.format === 'league' ? ` of ${summary.roundsTotal ?? 3}` : ''}
+              </Text>
               <View style={styles.rowCenter}>
                 <ActivityIndicator color={colors.gold} />
                 <Text style={styles.muted}>Waiting for your next table…</Text>
@@ -226,6 +251,9 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
           })}
         </View>
 
+        {/* ---- Bracket / rounds ---- */}
+        {tables.length > 0 && <BracketView tables={tables} selfUserId={selfUserId} />}
+
         {summary.status === 'finished' && (
           <Pressable style={styles.primary} onPress={onExit}>
             <Text style={styles.primaryText}>Done</Text>
@@ -236,20 +264,70 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
   );
 }
 
+// Groups every table by round into a compact bracket view: each table lists its
+// seats, the winner crowned, and the rest dimmed.
+function BracketView({
+  tables,
+  selfUserId,
+}: {
+  tables: TournamentTableInfo[];
+  selfUserId: number;
+}) {
+  const byRound = new Map<number, TournamentTableInfo[]>();
+  for (const t of tables) {
+    const list = byRound.get(t.round) ?? [];
+    list.push(t);
+    byRound.set(t.round, list);
+  }
+  const rounds = [...byRound.keys()].sort((a, b) => a - b);
+
+  return (
+    <View style={styles.bracket}>
+      <Text style={styles.listTitle}>Bracket</Text>
+      {rounds.map((r) => (
+        <View key={r} style={styles.bracketRound}>
+          <Text style={styles.bracketRoundLabel}>Round {r}</Text>
+          {(byRound.get(r) ?? []).map((tbl, i) => (
+            <View key={i} style={styles.bracketTable}>
+              {tbl.players.map((p) => {
+                const won = tbl.winnerUserId === p.userId;
+                return (
+                  <Text
+                    key={p.userId}
+                    style={[
+                      styles.bracketName,
+                      won && styles.bracketWinner,
+                      !won && tbl.status === 'finished' && styles.bracketLoser,
+                      p.userId === selfUserId && styles.bracketSelf,
+                    ]}
+                  >
+                    {won ? '👑 ' : ''}
+                    {p.name}
+                  </Text>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function statusLabel(
   p: TournamentPlayerSummary,
   t: TournamentSummary
 ): string {
-  switch (p.status) {
-    case 'champion':
-      return '🏆 Champion';
-    case 'eliminated':
-      return p.eliminatedRound ? `Out · R${p.eliminatedRound}` : 'Out';
-    case 'active':
-      return t.status === 'running' ? `In · R${t.currentRound}` : 'In';
-    default:
-      return 'Ready';
+  if (p.status === 'champion') return '🏆 Champion';
+  if (t.status === 'finished' && p.place) return `#${p.place}`;
+  if (p.status === 'eliminated') {
+    return p.eliminatedRound ? `Out · R${p.eliminatedRound}` : 'Out';
   }
+  if (p.status === 'active') {
+    if (t.format === 'league') return `${p.points} pts`;
+    return t.status === 'running' ? `In · R${t.currentRound}` : 'In';
+  }
+  return 'Ready';
 }
 
 const styles = StyleSheet.create({
@@ -327,4 +405,30 @@ const styles = StyleSheet.create({
   rowName: { color: colors.text, fontWeight: '700', fontSize: 15 },
   rowSelf: { color: colors.gold },
   rowTag: { color: colors.textMuted, fontSize: 13, fontWeight: '700' },
+  bracket: {
+    backgroundColor: colors.feltDark,
+    borderRadius: 14,
+    padding: 16,
+    gap: 12,
+  },
+  bracketRound: { gap: 8 },
+  bracketRoundLabel: {
+    color: colors.textMuted,
+    fontWeight: '800',
+    fontSize: 13,
+    textTransform: 'uppercase',
+  },
+  bracketTable: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  bracketName: { color: colors.text, fontWeight: '700', fontSize: 14 },
+  bracketWinner: { color: colors.gold, fontWeight: '900' },
+  bracketLoser: { color: colors.textMuted, textDecorationLine: 'line-through' },
+  bracketSelf: { fontStyle: 'italic' },
 });

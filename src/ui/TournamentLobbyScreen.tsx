@@ -27,31 +27,55 @@ interface Props {
 // Buy-in presets (coins). 0 = free to enter.
 const BUY_INS = [0, 50, 100, 250, 500];
 
-// Phase 1 ships single-elimination; the other formats are wired in the UI but
-// flagged as coming soon until their scoring lands.
-const FORMATS: { key: TournamentFormat; label: string; soon?: boolean }[] = [
-  { key: 'bracket', label: 'Knockout' },
-  { key: 'league', label: 'League', soon: true },
-  { key: 'survival', label: 'Survival', soon: true },
+const FORMATS: {
+  key: TournamentFormat;
+  label: string;
+  blurb: string;
+}[] = [
+  {
+    key: 'bracket',
+    label: 'Knockout',
+    blurb: "Each table's winner advances; lose once and you're out.",
+  },
+  {
+    key: 'league',
+    label: 'League',
+    blurb: 'Play several rounds, earn points by finish. Highest total wins.',
+  },
+  {
+    key: 'survival',
+    label: 'Survival',
+    blurb: 'The bottom half of each table drops; survivors regroup.',
+  },
 ];
+
+// League: how many rounds everyone plays.
+const ROUND_COUNTS = [3, 5, 7];
 
 export function TournamentLobbyScreen({ onExit, onEnter }: Props) {
   const { user, refreshMe } = useAuth();
   const [format, setFormat] = useState<TournamentFormat>('bracket');
   const [tableSize, setTableSize] = useState(4);
   const [buyIn, setBuyIn] = useState(0);
+  const [roundsTotal, setRoundsTotal] = useState(3);
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const coins = user?.coins ?? 0;
+  const blurb = FORMATS.find((f) => f.key === format)?.blurb ?? '';
 
   const handleCreate = async () => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      const t = await createTournament({ format, tableSize, buyIn });
+      const t = await createTournament({
+        format,
+        tableSize,
+        buyIn,
+        ...(format === 'league' ? { roundsTotal } : {}),
+      });
       await refreshMe();
       onEnter(t);
     } catch (e) {
@@ -106,22 +130,42 @@ export function TournamentLobbyScreen({ onExit, onEnter }: Props) {
             {FORMATS.map((f) => (
               <Pressable
                 key={f.key}
-                onPress={() => !f.soon && setFormat(f.key)}
-                style={[
-                  styles.fmt,
-                  format === f.key && styles.fmtActive,
-                  f.soon && styles.fmtDisabled,
-                ]}
+                onPress={() => setFormat(f.key)}
+                style={[styles.fmt, format === f.key && styles.fmtActive]}
               >
                 <Text
                   style={[styles.fmtText, format === f.key && styles.fmtTextActive]}
                 >
                   {f.label}
                 </Text>
-                {f.soon && <Text style={styles.soon}>soon</Text>}
               </Pressable>
             ))}
           </View>
+          <Text style={styles.hint}>{blurb}</Text>
+
+          {format === 'league' && (
+            <>
+              <Text style={styles.label}>Rounds</Text>
+              <View style={styles.choices}>
+                {ROUND_COUNTS.map((n) => (
+                  <Pressable
+                    key={n}
+                    onPress={() => setRoundsTotal(n)}
+                    style={[styles.choice, roundsTotal === n && styles.choiceActive]}
+                  >
+                    <Text
+                      style={[
+                        styles.choiceText,
+                        roundsTotal === n && styles.choiceTextActive,
+                      ]}
+                    >
+                      {n}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          )}
 
           <Text style={styles.label}>Players per table</Text>
           <View style={styles.choices}>
@@ -255,10 +299,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   fmtActive: { borderColor: colors.gold },
-  fmtDisabled: { opacity: 0.5 },
   fmtText: { color: colors.text, fontSize: 15, fontWeight: '800' },
   fmtTextActive: { color: colors.gold },
-  soon: { color: colors.textMuted, fontSize: 10, fontWeight: '700' },
   choice: {
     width: 48,
     height: 48,

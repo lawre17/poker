@@ -9,6 +9,12 @@ import {
   getActiveMatch,
   setActiveMatch,
 } from './src/api/activeMatch';
+import {
+  ActiveTournament,
+  clearActiveTournament,
+  getActiveTournament,
+  setActiveTournament,
+} from './src/api/activeTournament';
 import { AuthProvider, useAuth } from './src/api/auth';
 import { GameScreen } from './src/ui/GameScreen';
 import { HomeScreen } from './src/ui/HomeScreen';
@@ -41,14 +47,31 @@ function AppContent() {
   const [route, setRoute] = useState<Route>({ name: 'home' });
   // A game the player is mid-way through (persisted), offered as "Rejoin".
   const [resume, setResume] = useState<ActiveMatch | null>(null);
+  // A tournament the player is mid-way through (persisted), offered as "Rejoin".
+  const [resumeTourney, setResumeTourney] = useState<ActiveTournament | null>(
+    null
+  );
 
   useEffect(() => {
     if (!token) {
       setResume(null);
+      setResumeTourney(null);
       return;
     }
     void getActiveMatch().then(setResume);
+    void getActiveTournament().then(setResumeTourney);
   }, [token]);
+
+  const enterTournament = (t: { id: string; code: string }) => {
+    void setActiveTournament({ tournamentId: t.id, code: t.code });
+    setResumeTourney({ tournamentId: t.id, code: t.code });
+  };
+
+  const exitTournament = () => {
+    void clearActiveTournament();
+    setResumeTourney(null);
+    setRoute({ name: 'home' });
+  };
 
   const enterGame = (match: OnlineMatch) => {
     void setActiveMatch({ matchId: match.matchId, roster: match.roster });
@@ -150,9 +173,10 @@ function AppContent() {
     return (
       <TournamentLobbyScreen
         onExit={() => setRoute({ name: 'home' })}
-        onEnter={(t) =>
-          setRoute({ name: 'tournament', id: t.id, initial: t })
-        }
+        onEnter={(t) => {
+          enterTournament(t);
+          setRoute({ name: 'tournament', id: t.id, initial: t });
+        }}
       />
     );
   }
@@ -164,7 +188,7 @@ function AppContent() {
         key={route.id}
         tournamentId={route.id}
         initial={route.initial}
-        onExit={() => setRoute({ name: 'home' })}
+        onExit={exitTournament}
       />
     );
   }
@@ -179,6 +203,16 @@ function AppContent() {
       resumeMatch={resume}
       onResume={() => resume && setRoute({ name: 'online', match: resume })}
       onForgetResume={leaveGame}
+      resumeTournament={resumeTourney}
+      onResumeTournament={() =>
+        resumeTourney &&
+        setRoute({
+          name: 'tournament',
+          id: resumeTourney.tournamentId,
+          initial: null,
+        })
+      }
+      onForgetTournament={exitTournament}
     />
   );
 }
