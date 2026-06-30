@@ -120,6 +120,11 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
             {summary.format === 'bracket' ? 'Knockout' : summary.format} · up to{' '}
             {summary.tableSize}/table
           </Text>
+          {summary.buyIn > 0 && (
+            <Text style={styles.pot}>
+              Entry 🪙 {summary.buyIn} · Pot 🪙 {summary.prizePool}
+            </Text>
+          )}
         </View>
 
         {/* ---- Status banner ---- */}
@@ -161,20 +166,30 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
             </View>
           ))}
 
-        {summary.status === 'finished' && (
-          <View style={[styles.banner, styles.bannerWin]}>
-            <Text style={styles.trophy}>🏆</Text>
-            <Text style={styles.bannerTitle}>
-              {champ?.winnerName ??
-                summary.players.find((p) => p.status === 'champion')?.name ??
-                'Champion'}{' '}
-              wins!
-            </Text>
-            {!!champ?.prize && champ.prize > 0 && (
-              <Text style={styles.muted}>Prize: 🪙 {champ.prize}</Text>
-            )}
-          </View>
-        )}
+        {summary.status === 'finished' &&
+          (summary.winnerUserId == null ? (
+            <View style={styles.banner}>
+              <Text style={styles.bannerTitle}>Tournament cancelled</Text>
+              {summary.buyIn > 0 && (
+                <Text style={styles.muted}>Buy-ins have been refunded.</Text>
+              )}
+            </View>
+          ) : (
+            <View style={[styles.banner, styles.bannerWin]}>
+              <Text style={styles.trophy}>🏆</Text>
+              <Text style={styles.bannerTitle}>
+                {champ?.winnerName ??
+                  summary.players.find((p) => p.status === 'champion')?.name ??
+                  'Champion'}{' '}
+                wins!
+              </Text>
+              {(champ?.prize ?? summary.prizePool) > 0 && (
+                <Text style={styles.muted}>
+                  Prize: 🪙 {champ?.prize ?? summary.prizePool}
+                </Text>
+              )}
+            </View>
+          ))}
 
         {/* ---- Host start ---- */}
         {summary.status === 'registering' && isHost && (
@@ -264,6 +279,7 @@ const styles = StyleSheet.create({
     letterSpacing: 8,
   },
   codeSub: { color: colors.textMuted, fontSize: 12 },
+  pot: { color: colors.gold, fontSize: 13, fontWeight: '800', marginTop: 2 },
   banner: {
     backgroundColor: colors.feltDark,
     borderRadius: 14,

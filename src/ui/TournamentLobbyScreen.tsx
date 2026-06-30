@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../api/auth';
 import { ApiError } from '../api/client';
 import {
   createTournament,
@@ -23,6 +24,9 @@ interface Props {
   onEnter: (tournament: TournamentSummary) => void;
 }
 
+// Buy-in presets (coins). 0 = free to enter.
+const BUY_INS = [0, 50, 100, 250, 500];
+
 // Phase 1 ships single-elimination; the other formats are wired in the UI but
 // flagged as coming soon until their scoring lands.
 const FORMATS: { key: TournamentFormat; label: string; soon?: boolean }[] = [
@@ -32,18 +36,23 @@ const FORMATS: { key: TournamentFormat; label: string; soon?: boolean }[] = [
 ];
 
 export function TournamentLobbyScreen({ onExit, onEnter }: Props) {
+  const { user, refreshMe } = useAuth();
   const [format, setFormat] = useState<TournamentFormat>('bracket');
   const [tableSize, setTableSize] = useState(4);
+  const [buyIn, setBuyIn] = useState(0);
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const coins = user?.coins ?? 0;
 
   const handleCreate = async () => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      const t = await createTournament({ format, tableSize });
+      const t = await createTournament({ format, tableSize, buyIn });
+      await refreshMe();
       onEnter(t);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not create the tournament.');
@@ -63,6 +72,7 @@ export function TournamentLobbyScreen({ onExit, onEnter }: Props) {
     setError(null);
     try {
       const t = await joinTournament(c);
+      await refreshMe();
       onEnter(t);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not join that tournament.');
@@ -79,7 +89,7 @@ export function TournamentLobbyScreen({ onExit, onEnter }: Props) {
             <Text style={styles.back}>‹ Back</Text>
           </Pressable>
           <Text style={styles.title}>Tournaments 🏆</Text>
-          <View style={{ width: 50 }} />
+          <Text style={styles.wallet}>🪙 {coins}</Text>
         </View>
 
         {!!error && (
@@ -137,6 +147,28 @@ export function TournamentLobbyScreen({ onExit, onEnter }: Props) {
             winner advances; the last player standing takes the title.
           </Text>
 
+          <Text style={styles.label}>Buy-in</Text>
+          <View style={styles.choices}>
+            {BUY_INS.map((n) => (
+              <Pressable
+                key={n}
+                onPress={() => setBuyIn(n)}
+                style={[styles.buyIn, buyIn === n && styles.choiceActive]}
+              >
+                <Text
+                  style={[styles.buyInText, buyIn === n && styles.choiceTextActive]}
+                >
+                  {n === 0 ? 'Free' : `🪙 ${n}`}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.hint}>
+            {buyIn === 0
+              ? 'Free to enter — just for bragging rights.'
+              : `Everyone pays 🪙 ${buyIn}; the winner takes the whole pot.`}
+          </Text>
+
           <Pressable
             style={[styles.primary, busy && styles.primaryDisabled]}
             onPress={handleCreate}
@@ -154,6 +186,9 @@ export function TournamentLobbyScreen({ onExit, onEnter }: Props) {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Join a tournament</Text>
+          <Text style={styles.hint}>
+            Joining pays the tournament's buy-in (if any).
+          </Text>
           <TextInput
             style={styles.codeInput}
             value={joinCode}
@@ -192,6 +227,7 @@ const styles = StyleSheet.create({
   },
   back: { color: colors.textMuted, fontWeight: '700', fontSize: 16, width: 50 },
   title: { color: colors.gold, fontWeight: '900', fontSize: 22 },
+  wallet: { color: colors.gold, fontWeight: '800', fontSize: 16, width: 70, textAlign: 'right' },
   errorBanner: {
     backgroundColor: 'rgba(231,76,60,0.9)',
     borderRadius: 10,
@@ -236,6 +272,17 @@ const styles = StyleSheet.create({
   choiceActive: { borderColor: colors.gold },
   choiceText: { color: colors.text, fontSize: 18, fontWeight: '800' },
   choiceTextActive: { color: colors.gold },
+  buyIn: {
+    paddingHorizontal: 14,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.feltLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  buyInText: { color: colors.text, fontSize: 15, fontWeight: '800' },
   hint: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   primary: {
     backgroundColor: colors.gold,

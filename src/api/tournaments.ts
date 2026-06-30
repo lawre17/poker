@@ -44,6 +44,7 @@ export interface TournamentTablePayload {
 export interface CreateTournamentOptions {
   format?: TournamentFormat;
   tableSize?: number;
+  buyIn?: number;
   settings?: GameSettings;
 }
 
@@ -53,6 +54,7 @@ export function createTournament(
   const body: Record<string, unknown> = {};
   if (opts.format) body.format = opts.format;
   if (opts.tableSize !== undefined) body.tableSize = opts.tableSize;
+  if (opts.buyIn !== undefined) body.buyIn = opts.buyIn;
   if (opts.settings) body.settings = opts.settings;
   return apiFetch<TournamentSummary>('/tournaments', { method: 'POST', body });
 }
