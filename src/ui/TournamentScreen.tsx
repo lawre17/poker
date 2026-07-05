@@ -11,11 +11,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../api/auth';
 import {
-  TournamentPlayerSummary,
   TournamentSummary,
   TournamentTableInfo,
 } from '../api/tournaments';
 import { OnlineGameScreen } from './OnlineGameScreen';
+import { sortStandings, standingLabel } from './tournamentStandings';
 import { useTournament } from './useTournament';
 import { colors } from './theme';
 
@@ -23,15 +23,6 @@ interface Props {
   tournamentId: string;
   initial?: TournamentSummary | null;
   onExit: () => void;
-}
-
-// Sort for the standings list. Once finished, order by final place; while
-// running: champion, then players still in, then eliminated by how far they got.
-function rank(p: TournamentPlayerSummary): number {
-  if (p.place) return 1_000_000 - p.place;
-  if (p.status === 'champion') return 1_000_000;
-  if (p.status === 'active' || p.status === 'registered') return 500_000;
-  return p.eliminatedRound ?? 0;
 }
 
 function formatLabel(t: TournamentSummary): string {
@@ -76,6 +67,7 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
         matchId={activeMatchId}
         roster={tableRosters[activeMatchId] ?? []}
         tournamentMode
+        standings={summary ? { summary, selfUserId } : null}
         onExit={() => {
           setDismissedMatchId(activeMatchId);
           setActiveMatchId(null);
@@ -121,7 +113,7 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
   }
 
   const isHost = user != null && Number(user.id) === summary.hostUserId;
-  const standings = summary.players.slice().sort((a, b) => rank(b) - rank(a));
+  const standings = sortStandings(summary.players);
   const champ =
     finished ?? null;
 
@@ -245,7 +237,7 @@ export function TournamentScreen({ tournamentId, initial, onExit }: Props) {
                   {p.name}
                   {isSelf ? ' (you)' : ''}
                 </Text>
-                <Text style={styles.rowTag}>{statusLabel(p, summary)}</Text>
+                <Text style={styles.rowTag}>{standingLabel(p, summary)}</Text>
               </View>
             );
           })}
@@ -312,22 +304,6 @@ function BracketView({
       ))}
     </View>
   );
-}
-
-function statusLabel(
-  p: TournamentPlayerSummary,
-  t: TournamentSummary
-): string {
-  if (p.status === 'champion') return '🏆 Champion';
-  if (t.status === 'finished' && p.place) return `#${p.place}`;
-  if (p.status === 'eliminated') {
-    return p.eliminatedRound ? `Out · R${p.eliminatedRound}` : 'Out';
-  }
-  if (p.status === 'active') {
-    if (t.format === 'league') return `${p.points} pts`;
-    return t.status === 'running' ? `In · R${t.currentRound}` : 'In';
-  }
-  return 'Ready';
 }
 
 const styles = StyleSheet.create({

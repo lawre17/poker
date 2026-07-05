@@ -50,7 +50,7 @@ const FORMATS: {
 ];
 
 // League: how many rounds everyone plays.
-const ROUND_COUNTS = [3, 5, 7];
+const ROUND_COUNTS = [3, 5, 7, 10, 15];
 
 export function TournamentLobbyScreen({ onExit, onEnter }: Props) {
   const { user, refreshMe } = useAuth();

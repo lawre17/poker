@@ -9,8 +9,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Roster } from '../api/matches';
+import { TournamentSummary } from '../api/tournaments';
 import { ChatPanel } from './ChatPanel';
 import { GameScreen } from './GameScreen';
+import { StandingsPanel } from './StandingsPanel';
 import { useOnlineGame } from './useOnlineGame';
 import { colors } from './theme';
 
@@ -22,6 +24,8 @@ interface Props {
   // Tournament table: no rematch (the bracket controls what's next) and the
   // post-game button returns to the tournament board.
   tournamentMode?: boolean;
+  // Live tournament standings to surface during play (tournament tables only).
+  standings?: { summary: TournamentSummary; selfUserId: number } | null;
 }
 
 export function OnlineGameScreen({
@@ -30,6 +34,7 @@ export function OnlineGameScreen({
   onExit,
   onRematch,
   tournamentMode = false,
+  standings = null,
 }: Props) {
   const {
     state,
@@ -110,6 +115,12 @@ export function OnlineGameScreen({
         onSend={sendChatMessage}
         onOpened={markChatRead}
       />
+      {standings && (
+        <StandingsPanel
+          summary={standings.summary}
+          selfUserId={standings.selfUserId}
+        />
+      )}
     </View>
   );
 }
