@@ -40,7 +40,7 @@ const FORMATS: {
   {
     key: 'league',
     label: 'League',
-    blurb: 'Play several rounds, earn points by finish. Highest total wins.',
+    blurb: 'Play several rounds, 3 points per win. Highest total wins.',
   },
   {
     key: 'survival',

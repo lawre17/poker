@@ -8,7 +8,12 @@ import {
 export function rankStanding(p: TournamentPlayerSummary): number {
   if (p.place) return 1_000_000 - p.place;
   if (p.status === 'champion') return 1_000_000;
-  if (p.status === 'active' || p.status === 'registered') return 500_000;
+  // League players are never eliminated, so they all stay 'active' the whole
+  // tournament — break the tie by points, otherwise every active player shares
+  // one key and the live standings render unordered. points is 0 outside a
+  // league, so this is a no-op for bracket/survival. Cumulative points stays
+  // well under the champion (1_000_000) and place buckets.
+  if (p.status === 'active' || p.status === 'registered') return 500_000 + p.points;
   return p.eliminatedRound ?? 0;
 }
 
