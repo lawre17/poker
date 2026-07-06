@@ -20,6 +20,7 @@ import { Card, GameState, Suit } from '../game/types';
 import { CardView } from './CardView';
 import { ChatBubble } from './ChatBubble';
 import { FlyingCardsOverlay, useCardFlights } from './FlyingCards';
+import { useSettings } from './SettingsContext';
 import { getMuted, setMuted } from './sound';
 import { SuitPicker } from './SuitPicker';
 import { colors, suitColor, suitSymbol } from './theme';
@@ -317,6 +318,17 @@ export function GameScreen({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
+
+  // Buzz the phone the moment the turn becomes mine (opt-out in Settings).
+  const { prefs } = useSettings();
+  const wasMyTurnRef = useRef(false);
+  useEffect(() => {
+    const was = wasMyTurnRef.current;
+    wasMyTurnRef.current = isHumanTurn;
+    if (isHumanTurn && !was && prefs.vibrateOnMyTurn) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
+  }, [isHumanTurn, prefs.vibrateOnMyTurn]);
 
   // --- Hand ordering (drag-to-reorder + Sort) -------------------------------
   // Keep `order` in sync with the actual hand: preserve the player's custom

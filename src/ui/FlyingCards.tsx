@@ -18,8 +18,8 @@ export interface Flight {
 // md card (must match CardView's `md` size).
 const FLY_W = 66;
 const FLY_H = 94;
-const STAGGER_MS = 90;
-const DURATION_MS = 380;
+const STAGGER_MS = 120;
+const DURATION_MS = 560;
 
 function FlyingCard({
   flight,

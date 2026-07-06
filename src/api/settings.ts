@@ -32,3 +32,35 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
     /* ignore — preferences are a convenience, not critical */
   }
 }
+
+// Device-only preferences (haptics, etc). Kept separate from GameSettings so
+// they never travel to the game engine as room rules — a buzz on your phone is
+// your own choice, not something a room host imposes on everyone.
+const PREFS_KEY = 'kadi_prefs';
+
+export interface DevicePrefs {
+  // Buzz this device when the turn becomes the local player's. On by default.
+  vibrateOnMyTurn: boolean;
+}
+
+export const DEFAULT_DEVICE_PREFS: DevicePrefs = {
+  vibrateOnMyTurn: true,
+};
+
+export async function getDevicePrefs(): Promise<DevicePrefs> {
+  try {
+    const raw = await SecureStore.getItemAsync(PREFS_KEY);
+    if (!raw) return DEFAULT_DEVICE_PREFS;
+    return { ...DEFAULT_DEVICE_PREFS, ...(JSON.parse(raw) as Partial<DevicePrefs>) };
+  } catch {
+    return DEFAULT_DEVICE_PREFS;
+  }
+}
+
+export async function saveDevicePrefs(prefs: DevicePrefs): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    /* ignore — preferences are a convenience, not critical */
+  }
+}
