@@ -68,11 +68,17 @@ export interface GameSettings {
   // false (manual mode), the player picks freely and illegal plays are rejected
   // by the rules at play time.
   assistedMode: boolean;
+  // When true, stacking two or more Aces in one throw lets you DEMAND a rank:
+  // each following player must play that rank or draw and pass, until the demand
+  // circles back to you and clears. A single Ace is unaffected (blocks a penalty
+  // and changes the suit as usual). Off by default — not every table plays it.
+  aceDemand: boolean;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
   stackingPenalties: false,
   assistedMode: false,
+  aceDemand: false,
 };
 
 export type Phase = 'playing' | 'finished';
@@ -89,6 +95,12 @@ export interface GameState {
   // When a question card (8/Q) is on top and unanswered, the suit that must be
   // matched to answer it. null when there is no open question.
   questionSuit: Suit | null;
+  // Ace-demand rule (settings.aceDemand): the rank every following player must
+  // play (or draw and pass) until it circles back to the demander. null when no
+  // demand is open. `demanderIndex` is the seat that set it, so the demand can
+  // clear when the turn returns to them.
+  demandRank: Rank | null;
+  demanderIndex: number | null;
   // Accumulated penalty the current player must satisfy (pick that many cards),
   // unless they counter or block it.
   pendingPenalty: number;
@@ -112,7 +124,12 @@ export interface GameState {
 
 export type Move =
   | { type: 'play'; cardId: string; chosenSuit?: Suit } // chosenSuit required for Ace
-  | { type: 'playSequence'; cardIds: string[]; chosenSuit?: Suit } // multi-card throw
+  | {
+      type: 'playSequence';
+      cardIds: string[];
+      chosenSuit?: Suit; // required when the throw ends on an Ace
+      demandRank?: Rank; // the rank demanded by a 2+ Ace stack (aceDemand rule)
+    } // multi-card throw
   | { type: 'draw' } // pick a card / satisfy a penalty
   | { type: 'skipTurn' } // accept a Jack skip (lose your turn)
   | { type: 'announceKadi' };

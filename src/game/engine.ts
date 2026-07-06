@@ -16,6 +16,7 @@ import {
   GameState,
   Move,
   Player,
+  Rank,
   Suit,
 } from './types';
 
@@ -84,6 +85,8 @@ export function createGame(
     direction: 1,
     activeSuit: start.suit,
     questionSuit: null,
+    demandRank: null,
+    demanderIndex: null,
     pendingPenalty: 0,
     skipCount: 0,
     announcedKadi,
@@ -186,6 +189,11 @@ export function applyMove(prev: GameState, move: Move): GameState {
       drawCards(state, player, 1);
       log(state, `${player.name} can't answer and picks a card.`);
       state.questionSuit = null; // question dies
+    } else if (state.demandRank) {
+      // Can't (or won't) meet the demand: pick one up and pass it on. The demand
+      // stays open until it circles back to the demander (see advanceTurn).
+      drawCards(state, player, 1);
+      log(state, `${player.name} has no ${state.demandRank} and picks a card.`);
     } else {
       drawCards(state, player, 1);
       log(state, `${player.name} picks a card.`);
@@ -195,7 +203,13 @@ export function applyMove(prev: GameState, move: Move): GameState {
   }
 
   if (move.type === 'playSequence') {
-    return applySequence(state, player, move.cardIds, move.chosenSuit);
+    return applySequence(
+      state,
+      player,
+      move.cardIds,
+      move.chosenSuit,
+      move.demandRank
+    );
   }
 
   // move.type === 'play'
@@ -219,6 +233,14 @@ export function applyMove(prev: GameState, move: Move): GameState {
   player.hand = player.hand.filter((c) => c.id !== card.id);
   state.discardPile.push(card);
   log(state, `${player.name} plays ${cardLabel(card)}.`);
+
+  // Meeting an open Ace demand (only the demanded rank is playable) satisfies it
+  // and clears it — the played card's own power still fires below.
+  if (state.demandRank !== null) {
+    log(state, `${player.name} answers the demand for ${state.demandRank}s.`);
+    state.demandRank = null;
+    state.demanderIndex = null;
+  }
 
   // Emptying the hand wins only on a valid finish (non-special last card, Kadi
   // declared, and nobody else already cardless). Otherwise the play is allowed
@@ -271,11 +293,38 @@ function noOtherCardless(state: GameState, player: Player): boolean {
 // Lay down a connected run of cards in one turn. Every card's power fires in
 // order (e.g. two Jacks queue two skips). Cannot empty the hand — you go out on
 // a single last card on a later turn.
+// A 2+ Ace stack under the aceDemand rule sets a rank demand on the table. Call
+// AFTER the aces' effects fire but BEFORE the turn advances, so demanderIndex is
+// the current (demanding) player. No-op unless the rule is on, every card is an
+// Ace, there are at least two, and a rank was chosen.
+function maybeSetAceDemand(
+  state: GameState,
+  player: Player,
+  cards: Card[],
+  demandRank?: Rank
+): void {
+  if (
+    !state.settings.aceDemand ||
+    !demandRank ||
+    cards.length < 2 ||
+    !cards.every((c) => c.rank === 'A')
+  ) {
+    return;
+  }
+  state.demandRank = demandRank;
+  state.demanderIndex = state.currentPlayerIndex;
+  log(
+    state,
+    `${player.name} stacks ${cards.length} Aces and demands ${demandRank}s!`
+  );
+}
+
 function applySequence(
   state: GameState,
   player: Player,
   cardIds: string[],
-  chosenSuit?: Suit
+  chosenSuit?: Suit,
+  demandRank?: Rank
 ): GameState {
   if (!canStartSequence(state)) {
     throw new Error('You can only throw a sequence on a clean turn.');
@@ -319,6 +368,7 @@ function applySequence(
       const isLast = i === cards.length - 1;
       step = applyOneCardEffect(state, player, cards[i], isLast, chosenSuit);
     }
+    maybeSetAceDemand(state, player, cards, demandRank);
     log(
       state,
       `${player.name} is now cardless — they must pick a card next turn.`
@@ -339,6 +389,7 @@ function applySequence(
     const isLast = i === cards.length - 1;
     step = applyOneCardEffect(state, player, cards[i], isLast, chosenSuit);
   }
+  maybeSetAceDemand(state, player, cards, demandRank);
   finishTurn(state, player, step);
   return state;
 }
@@ -432,6 +483,14 @@ function advanceTurn(state: GameState, step: number): void {
   // The declaration window only covers the turn it was made on; once the turn
   // moves on, a declared player may win on their following turn.
   state.declaredThisTurn = false;
+
+  // An open Ace demand dies the moment the turn returns to the player who made
+  // it — they don't have to answer their own demand.
+  if (state.demandRank !== null && state.currentPlayerIndex === state.demanderIndex) {
+    log(state, `The demand for ${state.demandRank}s comes back around and clears.`);
+    state.demandRank = null;
+    state.demanderIndex = null;
+  }
 }
 
 // Convenience used by the UI / AI: is there any legal play for the current

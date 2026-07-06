@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { decideMove } from '../game/ai';
 import { applyMove, createGame, PlayerConfig } from '../game/engine';
-import { DEFAULT_SETTINGS, GameSettings, GameState, Move, Suit } from '../game/types';
+import { DEFAULT_SETTINGS, GameSettings, GameState, Move, Rank, Suit } from '../game/types';
 import { initSounds, playSound } from './sound';
 
 export interface NewGameOptions {
@@ -146,9 +146,9 @@ export function useGame() {
     [dispatch]
   );
   const playSequence = useCallback(
-    (cardIds: string[], chosenSuit?: Suit) => {
+    (cardIds: string[], chosenSuit?: Suit, demandRank?: Rank) => {
       hapticLight();
-      dispatch({ type: 'playSequence', cardIds, chosenSuit });
+      dispatch({ type: 'playSequence', cardIds, chosenSuit, demandRank });
     },
     [dispatch]
   );

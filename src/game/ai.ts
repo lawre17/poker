@@ -1,5 +1,5 @@
 import { canStartSequence, findWinningPlay, isSpecial, playableCards } from './rules';
-import { Card, GameState, Move, Suit, SUITS } from './types';
+import { Card, GameState, Move, Rank, Suit, SUITS } from './types';
 
 // Preference order for offloading special cards (Aces kept for last — they're
 // the most flexible: wild + penalty block).
@@ -19,6 +19,22 @@ const OFFLOAD_ORDER: Record<string, number> = {
   '10': 6,
   A: 9,
 };
+
+// Pick a rank to demand when stacking Aces: the AI's most-held non-Ace rank (so
+// it's plausible opponents are short on it), falling back to a middling number
+// for an all-Ace hand.
+function pickDemandRank(hand: Card[]): Rank {
+  const counts = new Map<Rank, number>();
+  for (const c of hand) {
+    if (c.rank === 'A') continue;
+    counts.set(c.rank, (counts.get(c.rank) ?? 0) + 1);
+  }
+  let best: Rank | null = null;
+  for (const [rank, n] of counts) {
+    if (best === null || n > (counts.get(best) ?? 0)) best = rank;
+  }
+  return best ?? '7';
+}
 
 function mostCommonSuit(hand: Card[], exclude?: Card): Suit {
   const counts: Record<Suit, number> = {
@@ -132,11 +148,16 @@ export function decideMove(state: GameState): Move {
     const take = Math.min(dupes.length, Math.max(0, player.hand.length - 2));
     if (take >= 1) {
       const seq = [first, ...dupes.slice(0, take)];
+      const aceStack = first.rank === 'A' && seq.length >= 2;
       return {
         type: 'playSequence',
         cardIds: seq.map((c) => c.id),
         chosenSuit:
           first.rank === 'A' ? mostCommonSuit(player.hand, first) : undefined,
+        demandRank:
+          aceStack && state.settings.aceDemand
+            ? pickDemandRank(player.hand)
+            : undefined,
       };
     }
   }

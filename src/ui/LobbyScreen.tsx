@@ -46,6 +46,7 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
   // omitted online — card hints would be unfair against real opponents.
   const [aiOpponents, setAiOpponents] = useState(0);
   const [stacking, setStacking] = useState(false);
+  const [aceDemand, setAceDemand] = useState(false);
 
   // Join input.
   const [joinCode, setJoinCode] = useState('');
@@ -92,7 +93,11 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
     try {
       const res = await createMatch({
         aiOpponents,
-        settings: { stackingPenalties: stacking, assistedMode: false },
+        settings: {
+          stackingPenalties: stacking,
+          assistedMode: false,
+          aceDemand,
+        },
       });
       setCode(res.code);
       setMatchId(res.matchId);
@@ -227,6 +232,20 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
                 <Switch
                   value={stacking}
                   onValueChange={setStacking}
+                  trackColor={{ true: colors.gold }}
+                />
+              </View>
+
+              <View style={styles.switchRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Ace demand</Text>
+                  <Text style={styles.hint}>
+                    Stack 2+ Aces to demand a rank — play it or draw
+                  </Text>
+                </View>
+                <Switch
+                  value={aceDemand}
+                  onValueChange={setAceDemand}
                   trackColor={{ true: colors.gold }}
                 />
               </View>

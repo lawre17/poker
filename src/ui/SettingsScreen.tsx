@@ -95,6 +95,24 @@ export function SettingsScreen({ onExit }: Props) {
 
             <View style={styles.switchRow}>
               <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Ace demand</Text>
+                <Text style={styles.hint}>
+                  Stacking 2+ Aces lets you demand a rank — each player must play
+                  it or draw, until it circles back to you. A single Ace still
+                  just blocks a penalty and changes suit.
+                </Text>
+              </View>
+              <Switch
+                value={settings.aceDemand}
+                onValueChange={(v) => update({ aceDemand: v })}
+                trackColor={{ true: colors.gold }}
+              />
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.switchRow}>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.label}>Assisted mode</Text>
                 <Text style={styles.hint}>
                   Highlights your playable cards. Off = pick freely; illegal plays

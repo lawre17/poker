@@ -16,12 +16,13 @@ import {
   isPlayable,
   topCard,
 } from '../game/rules';
-import { Card, GameState, Suit } from '../game/types';
+import { Card, GameState, Rank, Suit } from '../game/types';
 import { CardView } from './CardView';
 import { ChatBubble } from './ChatBubble';
 import { FlyingCardsOverlay, useCardFlights } from './FlyingCards';
 import { useSettings } from './SettingsContext';
 import { getMuted, setMuted } from './sound';
+import { RankPicker } from './RankPicker';
 import { SuitPicker } from './SuitPicker';
 import { colors, suitColor, suitSymbol } from './theme';
 import { HUMAN_ID } from './useGame';
@@ -51,7 +52,7 @@ interface Props {
   state: GameState;
   feedback?: string | null;
   onPlay: (cardId: string, chosenSuit?: Suit) => void;
-  onPlaySequence: (cardIds: string[], chosenSuit?: Suit) => void;
+  onPlaySequence: (cardIds: string[], chosenSuit?: Suit, demandRank?: Rank) => void;
   onDraw: () => void;
   onSkipTurn: () => void;
   onAnnounceKadi: () => void;
@@ -95,6 +96,7 @@ export function GameScreen({
 }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [acePicker, setAcePicker] = useState<AcePicker>(null);
+  const [demandOpen, setDemandOpen] = useState(false);
   // Player's preferred hand order (card ids). Purely cosmetic — the engine
   // never cares about order. Reconciled with the actual hand below.
   const [order, setOrder] = useState<string[]>([]);
@@ -187,8 +189,26 @@ export function GameScreen({
     setSelected([]);
   };
 
+  // Stacking 2+ Aces under the aceDemand rule lets you demand a rank instead of
+  // just picking a suit.
+  const isAceStackDemand =
+    state.settings.aceDemand &&
+    selected.length >= 2 &&
+    selectedCards.length === selected.length &&
+    selectedCards.every((c) => c.rank === 'A');
+
+  const doDemand = (rank: Rank) => {
+    onPlaySequence(selected, undefined, rank);
+    setSelected([]);
+    setDemandOpen(false);
+  };
+
   const commit = () => {
     if (selected.length === 0 || blockedWin) return;
+    if (isAceStackDemand) {
+      setDemandOpen(true);
+      return;
+    }
     const last = selectedCards[selectedCards.length - 1];
     if (last.rank === 'A') setAcePicker({ mode: 'commit' });
     else doCommit();
@@ -583,6 +603,14 @@ export function GameScreen({
             </Text>
           </View>
         )}
+        {state.demandRank && (
+          <View style={[styles.banner, styles.bannerInfo]}>
+            <Text style={styles.bannerText}>
+              🅰 Demand: play a {state.demandRank}
+              {isHumanTurn ? ' — or draw and pass' : ` · ${current.name} must respond`}
+            </Text>
+          </View>
+        )}
         {state.skipCount > 0 && (
           <View style={[styles.banner, styles.bannerWarn]}>
             <Text style={styles.bannerText}>
@@ -709,7 +737,9 @@ export function GameScreen({
                     ? state.announcedKadi[human.id]
                       ? 'Win on your next turn'
                       : 'Declare Niko Kadi! first'
-                    : `Play${selected.length > 1 ? ` ${selected.length} cards` : ''} ▶`}
+                    : isAceStackDemand
+                      ? `Demand with ${selected.length} Aces ▶`
+                      : `Play${selected.length > 1 ? ` ${selected.length} cards` : ''} ▶`}
                 </Text>
               </Pressable>
             </View>
@@ -782,6 +812,12 @@ export function GameScreen({
           setAcePicker(null);
         }}
         onCancel={() => setAcePicker(null)}
+      />
+
+      <RankPicker
+        visible={demandOpen}
+        onPick={doDemand}
+        onCancel={() => setDemandOpen(false)}
       />
     </SafeAreaView>
   );

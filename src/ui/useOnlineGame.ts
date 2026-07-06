@@ -13,7 +13,7 @@ import {
   sendMove,
 } from '../api/matches';
 import { ReverbClient } from '../realtime/reverb';
-import { GameState, Move, Suit } from '../game/types';
+import { GameState, Move, Rank, Suit } from '../game/types';
 import { initSounds, playSound } from './sound';
 
 export type ConnStatus =
@@ -297,9 +297,9 @@ export function useOnlineGame({
     [dispatch]
   );
   const playSequence = useCallback(
-    (cardIds: string[], chosenSuit?: Suit) => {
+    (cardIds: string[], chosenSuit?: Suit, demandRank?: Rank) => {
       hapticLight();
-      void dispatch({ type: 'playSequence', cardIds, chosenSuit });
+      void dispatch({ type: 'playSequence', cardIds, chosenSuit, demandRank });
     },
     [dispatch]
   );

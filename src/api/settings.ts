@@ -13,6 +13,7 @@ export type AppSettings = GameSettings;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   stackingPenalties: false,
   assistedMode: false,
+  aceDemand: false,
 };
 
 export async function getSettings(): Promise<AppSettings> {

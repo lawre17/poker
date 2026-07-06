@@ -62,6 +62,12 @@ export function isPlayable(state: GameState, card: Card): boolean {
     );
   }
 
+  // 2b. Open Ace demand — only a card of the demanded rank answers it. If you
+  //     can't, you draw and pass (handled in the engine).
+  if (state.demandRank) {
+    return card.rank === state.demandRank;
+  }
+
   // 3. Normal play.
   if (card.rank === 'A') return true; // Ace is wild, playable any time.
   if (card.suit === state.activeSuit) return true;
@@ -79,7 +85,10 @@ export function playableCards(state: GameState, hand: Card[]): Card[] {
 // then may a player lay down a multi-card sequence.
 export function canStartSequence(state: GameState): boolean {
   return (
-    state.pendingPenalty === 0 && state.skipCount === 0 && !state.questionSuit
+    state.pendingPenalty === 0 &&
+    state.skipCount === 0 &&
+    !state.questionSuit &&
+    state.demandRank === null
   );
 }
 
