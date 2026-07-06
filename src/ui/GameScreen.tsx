@@ -19,6 +19,7 @@ import {
 import { Card, GameState, Suit } from '../game/types';
 import { CardView } from './CardView';
 import { ChatBubble } from './ChatBubble';
+import { FlyingCardsOverlay, useCardFlights } from './FlyingCards';
 import { getMuted, setMuted } from './sound';
 import { SuitPicker } from './SuitPicker';
 import { colors, suitColor, suitSymbol } from './theme';
@@ -263,6 +264,60 @@ export function GameScreen({
     }
   }, [state.phase, winPop]);
 
+  // --- Flying-card draw animation -------------------------------------------
+  // When a player draws, send face-down cards flying from the draw pile to their
+  // stack (my hand, or an opponent's fan). Positions are measured live so the
+  // arc always lands right despite the radial fan and safe-area insets.
+  const { flights, launch, remove } = useCardFlights();
+  const drawPileRef = useRef<View>(null);
+  const handRef = useRef<View>(null);
+  const overlayRef = useRef<View>(null);
+  const oppRefs = useRef<Record<string, View | null>>({});
+  const prevStateRef = useRef<GameState | null>(null);
+
+  useEffect(() => {
+    const prev = prevStateRef.current;
+    prevStateRef.current = state;
+    if (!prev) return; // skip the opening deal
+
+    // A draw grows exactly one player's hand; a fresh deal grows everyone's, and
+    // a play shrinks one — so a single grower uniquely identifies a draw.
+    const prevCount = new Map(prev.players.map((p) => [p.id, p.hand.length]));
+    const growers = state.players.filter(
+      (p) => p.hand.length > (prevCount.get(p.id) ?? p.hand.length)
+    );
+    if (growers.length !== 1) return;
+
+    const drew = growers[0];
+    // Fly the real number drawn, capped at 3 so big stacked penalties stay tidy.
+    const count = Math.min(drew.hand.length - (prevCount.get(drew.id) ?? 0), 3);
+    const pile = drawPileRef.current;
+    const overlay = overlayRef.current;
+    const target = drew.id === human.id ? handRef.current : oppRefs.current[drew.id];
+    if (!pile || !overlay || !target) return;
+
+    const rectOf = (node: View) =>
+      new Promise<{ x: number; y: number; w: number; h: number }>((resolve) =>
+        node.measureInWindow((x, y, w, h) => resolve({ x, y, w, h }))
+      );
+
+    let cancelled = false;
+    Promise.all([rectOf(pile), rectOf(target), rectOf(overlay)]).then(
+      ([p, t, o]) => {
+        if (cancelled) return;
+        launch(
+          { x: p.x + p.w / 2 - o.x, y: p.y + p.h / 2 - o.y },
+          { x: t.x + t.w / 2 - o.x, y: t.y + t.h / 2 - o.y },
+          count
+        );
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
   // --- Hand ordering (drag-to-reorder + Sort) -------------------------------
   // Keep `order` in sync with the actual hand: preserve the player's custom
   // order for cards they still hold, append freshly drawn cards at the end, and
@@ -439,7 +494,12 @@ export function GameScreen({
                 {p.name}
                 {state.announcedKadi[p.id] ? ' · Kadi!' : ''}
               </Text>
-              <View style={styles.oppCards}>
+              <View
+                style={styles.oppCards}
+                ref={(el) => {
+                  oppRefs.current[p.id] = el;
+                }}
+              >
                 {p.hand.slice(0, 5).map((c, i) => (
                   <View key={c.id} style={{ marginLeft: i === 0 ? 0 : -22 }}>
                     <CardView faceDown size="sm" />
@@ -456,6 +516,7 @@ export function GameScreen({
       <View style={styles.table}>
         <View style={styles.pileRow}>
           <Pressable
+            ref={drawPileRef}
             onPress={() => isHumanTurn && onDraw()}
             style={styles.pileSlot}
           >
@@ -562,7 +623,7 @@ export function GameScreen({
           </View>
         </View>
 
-        <View style={[styles.hand, { height: fanHeight }]}>
+        <View ref={handRef} style={[styles.hand, { height: fanHeight }]}>
           {orderedHand.map((c, i) => {
             const selOrder = selected.indexOf(c.id);
             const isSel = selOrder >= 0;
@@ -697,6 +758,9 @@ export function GameScreen({
           </Animated.View>
         </View>
       )}
+
+      {/* Flying-card draw animation (above the board, below modals). */}
+      <FlyingCardsOverlay ref={overlayRef} flights={flights} onDone={remove} />
 
       <SuitPicker
         visible={acePicker !== null}
