@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -20,6 +22,19 @@ import {
 } from '../api/matches';
 import { ReverbClient } from '../realtime/reverb';
 import { colors } from './theme';
+
+// Where friends grab the app. Served by kadi-api's /download route.
+const DOWNLOAD_URL = 'https://kadi.olininnovations.co.ke/download';
+
+// Fun invite text for a room code, with the download link so newcomers can grab
+// the app in the same message.
+function inviteMessage(code: string): string {
+  return (
+    `🃏 Join my Kadi game!\n\n` +
+    `Room code: *${code}*\n\n` +
+    `Get the app 👉 ${DOWNLOAD_URL}`
+  );
+}
 
 export interface OnlineMatch {
   matchId: string;
@@ -85,6 +100,28 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
       clientRef.current = null;
     };
   }, [matchId, token, isHost]);
+
+  // Share the room code on WhatsApp with the download link baked in. Falls back
+  // to the wa.me web link, then the OS share sheet, if WhatsApp isn't installed.
+  const shareToWhatsApp = async () => {
+    if (!code) return;
+    const msg = inviteMessage(code);
+    const waApp = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+    const waWeb = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    try {
+      if (await Linking.canOpenURL(waApp)) {
+        await Linking.openURL(waApp);
+      } else {
+        await Linking.openURL(waWeb);
+      }
+    } catch {
+      try {
+        await Share.share({ message: msg });
+      } catch {
+        /* user dismissed / nothing to do */
+      }
+    }
+  };
 
   const handleCreate = async () => {
     if (busy) return;
@@ -296,10 +333,17 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Room</Text>
             {!!code && (
-              <View style={styles.codeBadge}>
-                <Text style={styles.codeLabel}>Code</Text>
-                <Text style={styles.codeValue}>{code}</Text>
-              </View>
+              <>
+                <View style={styles.codeBadge}>
+                  <Text style={styles.codeLabel}>Code</Text>
+                  <Text style={styles.codeValue}>{code}</Text>
+                </View>
+                <Pressable style={styles.whatsappBtn} onPress={shareToWhatsApp}>
+                  <Text style={styles.whatsappBtnText}>
+                    Share code on WhatsApp
+                  </Text>
+                </Pressable>
+              </>
             )}
 
             {RosterList}
@@ -410,6 +454,14 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 8,
   },
+  whatsappBtn: {
+    backgroundColor: '#25D366',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  whatsappBtnText: { color: '#0b3d20', fontWeight: '800', fontSize: 15 },
   rosterBox: { gap: 8 },
   rosterTitle: { color: colors.text, fontWeight: '800', fontSize: 15 },
   rosterRow: {
