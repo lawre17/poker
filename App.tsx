@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Linking, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -28,6 +28,7 @@ import { SplashScreen } from './src/ui/SplashScreen';
 import { TournamentLobbyScreen } from './src/ui/TournamentLobbyScreen';
 import { TournamentScreen } from './src/ui/TournamentScreen';
 import { TournamentSummary } from './src/api/tournaments';
+import { parseJoinCode } from './src/ui/deepLink';
 import { colors } from './src/ui/theme';
 import { useGame } from './src/ui/useGame';
 
@@ -35,7 +36,7 @@ const queryClient = new QueryClient();
 
 type Route =
   | { name: 'home' }
-  | { name: 'lobby' }
+  | { name: 'lobby'; joinCode?: string }
   | { name: 'settings' }
   | { name: 'tourneyLobby' }
   | { name: 'tournament'; id: string; initial: TournamentSummary | null }
@@ -52,6 +53,10 @@ function AppContent() {
     null
   );
 
+  // A room code from a deep link (the https App Link or kadi://join/CODE),
+  // applied once we're signed in.
+  const [pendingJoin, setPendingJoin] = useState<string | null>(null);
+
   useEffect(() => {
     if (!token) {
       setResume(null);
@@ -61,6 +66,25 @@ function AppContent() {
     void getActiveMatch().then(setResume);
     void getActiveTournament().then(setResumeTourney);
   }, [token]);
+
+  // Capture join links (both a cold launch and links while running).
+  useEffect(() => {
+    const handleUrl = (url: string | null) => {
+      const joinCode = parseJoinCode(url);
+      if (joinCode) setPendingJoin(joinCode);
+    };
+    void Linking.getInitialURL().then(handleUrl);
+    const sub = Linking.addEventListener('url', (e) => handleUrl(e.url));
+    return () => sub.remove();
+  }, []);
+
+  // Once signed in, jump straight to the lobby with the code prefilled.
+  useEffect(() => {
+    if (token && pendingJoin) {
+      setRoute({ name: 'lobby', joinCode: pendingJoin });
+      setPendingJoin(null);
+    }
+  }, [token, pendingJoin]);
 
   const enterTournament = (t: { id: string; code: string }) => {
     void setActiveTournament({ tournamentId: t.id, code: t.code });
@@ -159,6 +183,7 @@ function AppContent() {
       <LobbyScreen
         onExit={() => setRoute({ name: 'home' })}
         onEnterGame={enterGame}
+        initialCode={route.joinCode}
       />
     );
   }

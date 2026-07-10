@@ -23,16 +23,20 @@ import {
 import { ReverbClient } from '../realtime/reverb';
 import { colors } from './theme';
 
-// Where friends grab the app. Served by kadi-api's /download route.
-const DOWNLOAD_URL = 'https://kadi.olininnovations.co.ke/download';
+// One smart link per room: tapping it opens the app straight to the join flow
+// (verified App Link), or — if Kadi isn't installed — a web page that shows the
+// code and a download button.
+function joinLink(code: string): string {
+  return `https://kadi.olininnovations.co.ke/join/${code}`;
+}
 
-// Fun invite text for a room code, with the download link so newcomers can grab
-// the app in the same message.
+// Fun invite text for a room code.
 function inviteMessage(code: string): string {
   return (
     `🃏 Join my Kadi game!\n\n` +
     `Room code: *${code}*\n\n` +
-    `Get the app 👉 ${DOWNLOAD_URL}`
+    `👉 ${joinLink(code)}\n` +
+    `(opens the game, or grab it there first)`
   );
 }
 
@@ -46,11 +50,13 @@ interface Props {
   // Fired when the host starts (or, for guests, when the match begins) — hands
   // the live match off to the online GameScreen.
   onEnterGame: (match: OnlineMatch) => void;
+  // A room code from a deep link — prefilled and auto-joined on open.
+  initialCode?: string;
 }
 
 type Mode = 'menu' | 'hosting' | 'joined';
 
-export function LobbyScreen({ onExit, onEnterGame }: Props) {
+export function LobbyScreen({ onExit, onEnterGame, initialCode }: Props) {
   const { user, token } = useAuth();
 
   const [mode, setMode] = useState<Mode>('menu');
@@ -148,9 +154,9 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
     }
   };
 
-  const handleJoin = async () => {
+  const handleJoin = async (explicit?: string) => {
     if (busy) return;
-    const c = joinCode.trim().toUpperCase();
+    const c = (explicit ?? joinCode).trim().toUpperCase();
     if (c.length < 4) {
       setError('Enter the room code.');
       return;
@@ -170,6 +176,17 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
       setBusy(false);
     }
   };
+
+  // Arrived via a deep link: show the join view, prefill the code, and join once.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (!initialCode || autoJoinedRef.current || !token) return;
+    autoJoinedRef.current = true;
+    const c = initialCode.trim().toUpperCase();
+    setJoinCode(c);
+    void handleJoin(c); // success flips mode to 'joined' (the room card)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCode, token]);
 
   const handleStart = async () => {
     if (busy || matchId == null) return;
@@ -316,7 +333,7 @@ export function LobbyScreen({ onExit, onEnterGame }: Props) {
               />
               <Pressable
                 style={[styles.primary, busy && styles.primaryDisabled]}
-                onPress={handleJoin}
+                onPress={() => handleJoin()}
                 disabled={busy}
               >
                 {busy ? (
