@@ -132,9 +132,9 @@ function drawCards(state: GameState, player: Player, n: number): void {
     if (state.drawPile.length === 0) break; // truly nothing left
     player.hand.push(state.drawPile.pop()!);
   }
-  // Drawing means you couldn't go out — you lose a "Kadi" you declared on an
-  // EARLIER turn. A draw on your declaration turn keeps it (you'll try next turn).
-  if (!state.declaredThisTurn) state.announcedKadi[player.id] = false;
+  // NB: whether a declared "Kadi" survives a pick is decided by the `draw` move
+  // handler (normal pick drops it; "Still Kadi" keeps it) — not here, so the
+  // penalty/question/demand draws route through the same choice.
 }
 
 // Only the most recent entries are ever shown, and the whole state is broadcast
@@ -197,6 +197,18 @@ export function applyMove(prev: GameState, move: Move): GameState {
     } else {
       drawCards(state, player, 1);
       log(state, `${player.name} picks a card.`);
+    }
+    // You couldn't go out, so a "Kadi" declared on an EARLIER turn is normally
+    // forfeited. "Still Kadi" (move.keepKadi) lets the player pick AND keep their
+    // status — used when the suit doesn't yet favour their finisher — so they can
+    // go out on a later turn. A pick on the declaration turn always keeps it.
+    if (!state.declaredThisTurn && state.announcedKadi[player.id]) {
+      if (move.keepKadi) {
+        log(state, `${player.name} picks but stays on "Kadi".`);
+      } else {
+        state.announcedKadi[player.id] = false;
+        log(state, `${player.name} didn't go out — "Kadi" is lost.`);
+      }
     }
     advanceTurn(state, 1);
     return state;

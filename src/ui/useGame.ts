@@ -156,6 +156,14 @@ export function useGame() {
     hapticLight();
     dispatch({ type: 'draw' });
   }, [dispatch]);
+  // "Still Kadi": pick a card but keep a previously-declared Kadi (used when the
+  // suit doesn't yet let you finish).
+  const stillKadi = useCallback(() => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {}
+    );
+    dispatch({ type: 'draw', keepKadi: true });
+  }, [dispatch]);
   const skipTurn = useCallback(() => {
     hapticLight();
     dispatch({ type: 'skipTurn' });
@@ -175,6 +183,7 @@ export function useGame() {
     playCard,
     playSequence,
     draw,
+    stillKadi,
     skipTurn,
     announceKadi,
   };

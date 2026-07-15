@@ -130,6 +130,6 @@ export type Move =
       chosenSuit?: Suit; // required when the throw ends on an Ace
       demandRank?: Rank; // the rank demanded by a 2+ Ace stack (aceDemand rule)
     } // multi-card throw
-  | { type: 'draw' } // pick a card / satisfy a penalty
+  | { type: 'draw'; keepKadi?: boolean } // pick a card / satisfy a penalty; keepKadi = "Still Kadi" (pick but retain a declared Kadi)
   | { type: 'skipTurn' } // accept a Jack skip (lose your turn)
   | { type: 'announceKadi' };

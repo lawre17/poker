@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Linking, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -15,6 +15,7 @@ import {
   getActiveTournament,
   setActiveTournament,
 } from './src/api/activeTournament';
+import { checkForUpdate } from './src/api/appUpdate';
 import { AuthProvider, useAuth } from './src/api/auth';
 import { GameScreen } from './src/ui/GameScreen';
 import { HomeScreen } from './src/ui/HomeScreen';
@@ -67,6 +68,31 @@ function AppContent() {
     void getActiveTournament().then(setResumeTourney);
   }, [token]);
 
+  // On launch, ask the server whether a newer APK is out (the app is sideloaded,
+  // so it can't self-update). Prompt at most once per launch; fails soft offline.
+  const updateCheckedRef = useRef(false);
+  useEffect(() => {
+    if (updateCheckedRef.current) return;
+    updateCheckedRef.current = true;
+    void checkForUpdate().then((info) => {
+      if (!info) return;
+      Alert.alert(
+        'Update available',
+        `Kadi ${info.versionName} is out — you have ${info.currentVersionName}. ` +
+          `Update to get the latest fixes and features.`,
+        [
+          { text: 'Later', style: 'cancel' },
+          {
+            text: 'Update',
+            onPress: () => {
+              void Linking.openURL(info.url).catch(() => {});
+            },
+          },
+        ]
+      );
+    });
+  }, []);
+
   // Capture join links (both a cold launch and links while running).
   useEffect(() => {
     const handleUrl = (url: string | null) => {
@@ -118,6 +144,7 @@ function AppContent() {
     playCard,
     playSequence,
     draw,
+    stillKadi,
     skipTurn,
     announceKadi,
   } = useGame();
@@ -157,6 +184,7 @@ function AppContent() {
         onDraw={draw}
         onSkipTurn={skipTurn}
         onAnnounceKadi={announceKadi}
+        onStillKadi={stillKadi}
         onExit={exitToMenu}
       />
     );

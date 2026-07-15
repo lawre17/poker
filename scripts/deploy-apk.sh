@@ -37,3 +37,17 @@ echo "→ Uploading APK ($(du -h "$APK" | cut -f1)) to $SSH_TARGET…"
 ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "mkdir -p ${FORGE_PATH}/storage/app/mobile"
 rsync -avz --progress -e "ssh ${SSH_OPTS[*]}" "$APK" "${SSH_TARGET}:${FORGE_PATH}/storage/app/mobile/kadi.apk"
 echo "✓ Uploaded → ${FORGE_PATH}/storage/app/mobile/kadi.apk (served at /download)"
+
+# Publish the version manifest the app's launch-time update check reads. It goes
+# in public/ so nginx serves it directly (no Laravel route needed) at
+# https://kadi.olininnovations.co.ke/mobile/latest.json — must match MANIFEST_URL
+# in src/api/appUpdate.ts.
+VCODE="$(node -p "require('$ROOT_DIR/app.json').expo.android.versionCode" 2>/dev/null || echo 0)"
+VNAME="$(node -p "require('$ROOT_DIR/app.json').expo.version" 2>/dev/null || echo 0.0.0)"
+MANIFEST="$(mktemp)"
+printf '{"versionCode":%s,"versionName":"%s","url":"https://kadi.olininnovations.co.ke/download"}\n' \
+    "$VCODE" "$VNAME" > "$MANIFEST"
+ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "mkdir -p ${FORGE_PATH}/public/mobile"
+rsync -avz -e "ssh ${SSH_OPTS[*]}" "$MANIFEST" "${SSH_TARGET}:${FORGE_PATH}/public/mobile/latest.json"
+rm -f "$MANIFEST"
+echo "✓ Published manifest → /mobile/latest.json (v${VNAME}/${VCODE})"

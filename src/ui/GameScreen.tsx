@@ -3,6 +3,7 @@ import {
   Animated,
   PanResponder,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -56,6 +57,9 @@ interface Props {
   onDraw: () => void;
   onSkipTurn: () => void;
   onAnnounceKadi: () => void;
+  // Pick a card but keep a previously-declared Kadi ("Still Kadi"). Optional so
+  // callers that don't wire it simply don't offer the button.
+  onStillKadi?: () => void;
   onExit: () => void;
   // The engine id of the local player whose hand should be shown. Defaults to
   // the offline human ('you') so the single-player flow is unchanged; online
@@ -87,6 +91,7 @@ export function GameScreen({
   onDraw,
   onSkipTurn,
   onAnnounceKadi,
+  onStillKadi,
   onExit,
   selfId = HUMAN_ID,
   floats,
@@ -113,7 +118,23 @@ export function GameScreen({
 
   const human =
     state.players.find((p) => p.id === selfId) ?? state.players[0];
-  const opponents = state.players.filter((p) => p.id !== human.id);
+  // Opponents laid out in PLAY order — the sequence they follow the human around
+  // the table (following the current direction, so a King reversal reorders them).
+  const humanIndex = state.players.findIndex((p) => p.id === human.id);
+  const opponents = Array.from(
+    { length: state.players.length - 1 },
+    (_, k) => {
+      const n = state.players.length;
+      return state.players[
+        (((humanIndex + (k + 1) * state.direction) % n) + n) % n
+      ];
+    }
+  );
+  // With 3+ opponents the stacked cards no longer fit on one screen and used to
+  // push the table (piles) off behind the hand — so crowd them into a single
+  // horizontal, scrollable row of compact cards instead.
+  const manyOpponents = opponents.length >= 3;
+  const oppCardsShown = manyOpponents ? 2 : 5;
   const current = state.players[state.currentPlayerIndex];
   const isHumanTurn = current.id === human.id && state.phase === 'playing';
   const top = topCard(state);
@@ -218,6 +239,14 @@ export function GameScreen({
   // Declaring is always available on your turn until you've declared. It doesn't
   // end your turn, but you can only WIN on a later turn.
   const canAnnounce = isHumanTurn && !state.announcedKadi[human.id];
+  // Already declared Kadi on an earlier turn but the suit won't let you finish?
+  // "Still Kadi" picks a card and keeps your status for a later turn. (On the
+  // declaration turn a plain pick already keeps it, so only offer it after.)
+  const canStillKadi =
+    isHumanTurn &&
+    !!onStillKadi &&
+    state.announcedKadi[human.id] &&
+    !state.declaredThisTurn;
 
   const [muted, setMutedState] = useState(getMuted());
   const toggleMute = () => {
@@ -508,14 +537,18 @@ export function GameScreen({
         </View>
       </View>
 
-      {/* Opponents */}
-      <View style={styles.opponents}>
-        {opponents.map((p) => {
+      {/* Opponents — in play order (who follows whom around the table) */}
+      {(() => {
+        const oppNodes = opponents.map((p) => {
           const active = p.id === current.id && state.phase === 'playing';
           return (
             <View
               key={p.id}
-              style={[styles.opponent, active && styles.opponentActive]}
+              style={[
+                styles.opponent,
+                manyOpponents && styles.opponentCompact,
+                active && styles.opponentActive,
+              ]}
             >
               {floats?.[p.id] && (
                 <View style={styles.oppBubble} pointerEvents="none">
@@ -527,13 +560,16 @@ export function GameScreen({
                 {state.announcedKadi[p.id] ? ' · Kadi!' : ''}
               </Text>
               <View
-                style={styles.oppCards}
+                style={[styles.oppCards, manyOpponents && styles.oppCardsCompact]}
                 ref={(el) => {
                   oppRefs.current[p.id] = el;
                 }}
               >
-                {p.hand.slice(0, 5).map((c, i) => (
-                  <View key={c.id} style={{ marginLeft: i === 0 ? 0 : -22 }}>
+                {p.hand.slice(0, oppCardsShown).map((c, i) => (
+                  <View
+                    key={c.id}
+                    style={{ marginLeft: i === 0 ? 0 : manyOpponents ? -26 : -22 }}
+                  >
                     <CardView faceDown size="sm" />
                   </View>
                 ))}
@@ -541,8 +577,22 @@ export function GameScreen({
               <Text style={styles.oppCount}>{p.hand.length} cards</Text>
             </View>
           );
-        })}
-      </View>
+        });
+        // One bounded row for a crowded table (scroll to reach everyone),
+        // otherwise the roomy centred wrap for 1–2 opponents.
+        return manyOpponents ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.oppScroll}
+            contentContainerStyle={styles.oppScrollContent}
+          >
+            {oppNodes}
+          </ScrollView>
+        ) : (
+          <View style={styles.opponents}>{oppNodes}</View>
+        );
+      })()}
 
       {/* Table */}
       <View style={styles.table}>
@@ -659,6 +709,11 @@ export function GameScreen({
                   <Text style={styles.kadiBtnText}>Niko Kadi! 🔔</Text>
                 </Pressable>
               </Animated.View>
+            )}
+            {canStillKadi && (
+              <Pressable style={styles.kadiBtn} onPress={onStillKadi}>
+                <Text style={styles.kadiBtnText}>Still Kadi 🔔 · pick</Text>
+              </Pressable>
             )}
           </View>
         </View>
@@ -844,6 +899,17 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 8,
   },
+  // Crowded table (3+ opponents): a single horizontal row that scrolls, kept to
+  // its content height so it can never squeeze the table piles off-screen.
+  oppScroll: { flexGrow: 0, flexShrink: 0 },
+  oppScrollContent: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 8,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    flexGrow: 1,
+  },
   opponent: {
     alignItems: 'center',
     backgroundColor: colors.feltDark,
@@ -854,9 +920,11 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
+  opponentCompact: { minWidth: 72, paddingHorizontal: 8, paddingVertical: 6 },
   opponentActive: { borderColor: colors.gold },
   oppName: { color: colors.text, fontWeight: '700', maxWidth: 100 },
   oppCards: { flexDirection: 'row', marginVertical: 4, height: 66 },
+  oppCardsCompact: { marginVertical: 2 },
   oppCount: { color: colors.textMuted, fontSize: 12 },
   oppBubble: {
     position: 'absolute',

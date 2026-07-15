@@ -44,6 +44,7 @@ export function OnlineGameScreen({
     playCard,
     playSequence,
     draw,
+    stillKadi,
     skipTurn,
     announceKadi,
     exit,
@@ -103,6 +104,7 @@ export function OnlineGameScreen({
         onDraw={draw}
         onSkipTurn={skipTurn}
         onAnnounceKadi={announceKadi}
+        onStillKadi={stillKadi}
         onExit={confirmLeave}
         floats={floats}
         onRematch={tournamentMode ? undefined : acceptRematch}

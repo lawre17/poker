@@ -307,6 +307,13 @@ export function useOnlineGame({
     hapticLight();
     void dispatch({ type: 'draw' });
   }, [dispatch]);
+  // "Still Kadi": pick a card but keep a previously-declared Kadi.
+  const stillKadi = useCallback(() => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {}
+    );
+    void dispatch({ type: 'draw', keepKadi: true });
+  }, [dispatch]);
   const skipTurn = useCallback(() => {
     hapticLight();
     void dispatch({ type: 'skipTurn' });
@@ -409,6 +416,7 @@ export function useOnlineGame({
     playCard,
     playSequence,
     draw,
+    stillKadi,
     skipTurn,
     announceKadi,
     exit,
