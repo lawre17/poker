@@ -2,7 +2,7 @@
 
 A mobile card game — **Kadi**, the East-African "shedding" card game — built with React Native, Expo, and TypeScript. Play against AI opponents locally, or (historically) against other people online for coins.
 
-> **Project status: archived.** The online backend (Laravel API + a Node game service) has been retired, so online multiplayer, accounts, and coins no longer function. What remains here is the full app source: a pure, well-tested TypeScript game engine, the React Native UI, and an AI opponent. The repository was originally scaffolded under the name `poker`, but the game it implements is Kadi, not Western poker.
+> **Project status: archived.** The online backend (Laravel API + a Node game service) has been retired, so online multiplayer, accounts, and coins no longer function. What remains here is the full app source: a pure, well-tested TypeScript game engine, the React Native UI, and an AI opponent. The Laravel backend that powered accounts, coins, and matchmaking lives in a companion repo, [**lawre17/kadi-api**](https://github.com/lawre17/kadi-api), kept public for reference. The repository was originally scaffolded under the name `poker`, but the game it implements is Kadi, not Western poker.
 
 ## What is Kadi?
 
@@ -45,8 +45,8 @@ The engine is validated by **8,000+ automated game simulations** (2–5 players)
 | Game engine | Pure TypeScript (`src/game/`), no framework dependencies |
 | State/data | `@tanstack/react-query`, `expo-secure-store` |
 | Audio/haptics | `expo-audio`, `expo-haptics` |
-| Game service *(retired)* | Node + Express + `tsx`, reusing the same `src/game/` engine authoritatively (`server/`) |
-| Backend *(retired, separate repo)* | Laravel (Sanctum auth, coins ledger) + Reverb websockets |
+| Game service | Node + Express + `tsx`, reusing the same `src/game/` engine authoritatively (`server/`) |
+| Backend | Laravel (Sanctum auth, coins ledger) + Reverb websockets — separate repo: [**lawre17/kadi-api**](https://github.com/lawre17/kadi-api) |
 
 ## Project structure
 
